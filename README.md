@@ -30,3 +30,8 @@ The following diagrams represent the initial design for the project.
 - Week 4:
     - Implement Redis caching
     - Finalize demo and report
+
+## Running Current Demo of Visualization Webpage
+- Make sure to have huggingfacehub, fastapi[standard], bertviz, transformers, and pytorch installed
+- Create a HuggingFace account, a `.env` file, and place your key in it like `HF_TOKEN=<your_token>`
+- Run `uvicorn main:app --reload`
