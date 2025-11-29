@@ -1,4 +1,3 @@
-# main.py
 from fastapi import FastAPI, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
@@ -9,7 +8,6 @@ from visualization_logic import get_viz_data, free_memory
 from database import create_db_and_tables, get_session
 from models import Visualization
 
-# Redefine Styles if not exported from core_logic
 STYLES = """
 <style>
     body { font-family: sans-serif; background-color: #f4f4f9; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
@@ -23,6 +21,14 @@ STYLES = """
     .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
 </style>
 """
+
+
+'''
+    Uvicorn based FastAPI server for the Collaborative Transformer Zoo.
+    - Home page with form to submit model name, input text, and view type.
+    - Endpoint to create visualization, store in Postgres, and redirect.
+    - Endpoint to retrieve visualization from Postgres by ID.
+'''
 
 # Lifecycle: Run this when server starts
 @asynccontextmanager
@@ -62,7 +68,7 @@ async def unload_and_go_home():
     free_memory()
     return RedirectResponse(url="/")
 
-# --- NEW: WRITE TO DB ---
+# --- Write to DB and Redirect ---
 @app.post("/visualize")
 async def create_visualization(
     model_name: str = Form(...), 

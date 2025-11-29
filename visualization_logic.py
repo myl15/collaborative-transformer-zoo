@@ -1,13 +1,13 @@
-# core_logic.py
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 from huggingface_hub import HfApi
 from bertviz import head_view, model_view
 import torch
 from dotenv import load_dotenv
 import gc
+import os
 
 load_dotenv()
-import os
+
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 MODEL_CACHE = {
@@ -19,17 +19,17 @@ MODEL_CACHE = {
 
 if torch.cuda.is_available():
     DEVICE = "cuda"
-    print("🚀 Using GPU (CUDA)")
+    print("Using GPU (CUDA)")
 elif torch.backends.mps.is_available():
     DEVICE = "mps"
-    print("🚀 Using GPU (Apple Metal)")
+    print("Using GPU (Apple Metal)")
 else:
     DEVICE = "cpu"
-    print("🐢 Using CPU")
+    print("Using CPU")
 
 def free_memory():
     global MODEL_CACHE
-    print("🧹 Cleaning up memory...")
+    print("Cleaning up memory...")
     if MODEL_CACHE["model"] is not None:
         # Move to CPU before deleting to help clear VRAM
         MODEL_CACHE["model"].to("cpu") 
@@ -44,11 +44,13 @@ def free_memory():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    print("✨ RAM/VRAM is clean.")
+    print("RAM/VRAM is clean.")
 
 def load_model_smart(model_name):
     """
     Loads a model ONLY if it's not already currently loaded.
+    Uses a global cache to track the currently loaded model.
+    Returns the model, tokenizer, and config.
     """
     global MODEL_CACHE
     
@@ -58,11 +60,11 @@ def load_model_smart(model_name):
         return MODEL_CACHE["model"], MODEL_CACHE["tokenizer"], MODEL_CACHE["config"]
 
     # 2. Cache Miss: Free old memory first
-    print(f"🔄 Cache Miss: Switching from {MODEL_CACHE['name']} to {model_name}")
+    print(f"Cache Miss: Switching from {MODEL_CACHE['name']} to {model_name}")
     free_memory()
 
     # 3. Load New Model (Standard Logic)
-    print(f"📥 Loading {model_name} into RAM...")
+    print(f"Loading {model_name} into RAM...")
     config = AutoConfig.from_pretrained(model_name, token=HF_TOKEN)
     tokenizer = AutoTokenizer.from_pretrained(model_name, token=HF_TOKEN)
     
@@ -86,8 +88,14 @@ def move_to_cpu(tensors):
         return tuple(t.cpu() for t in tensors)
     return tensors.cpu()
 
-# --- 1. THE SAFETY RAIL ---
-def check_model_size(model_name_string, limit_gb=6.0): # Bumped to 6GB
+def check_model_size(model_name_string, limit_gb=6.0):
+    '''
+    Checks the size of a Hugging Face model before loading.
+    Returns (is_safe: bool, message: str)
+    
+    :param model_name_string: Hugging Face model name or path
+    :param limit_gb: Maximum allowed model size in gigabytes
+    '''
     api = HfApi()
     try:
         info = api.model_info(model_name_string, files_metadata=True)
@@ -104,7 +112,6 @@ def check_model_size(model_name_string, limit_gb=6.0): # Bumped to 6GB
                 
         size_in_gb = size_in_bytes / (1024 ** 3)
         
-        # Allow small errors (like 0.0GB) to pass if you want, or block them.
         if size_in_gb > limit_gb:
             return False, f"Model is {size_in_gb:.2f} GB (Limit: {limit_gb} GB)"
             
@@ -115,10 +122,16 @@ def check_model_size(model_name_string, limit_gb=6.0): # Bumped to 6GB
 
 
 def get_viz_data(model_name, text_input, view_type="head"):
+    '''
+    Main function to get visualization HTML data for a given model and input text.
+    Handles model loading, input processing, and visualization generation.
+    
+    :param model_name: Hugging Face model name or path
+    :param text_input: Input text to the model
+    :param view_type: Type of visualization ("head" or "model")
+    '''
     # A. Check Size (Only if we are about to load a NEW model)
     if MODEL_CACHE["name"] != model_name:
-        # (You need to import/define check_model_size here or above)
-        # Assuming check_model_size is defined in your file as discussed previously
         is_safe, msg = check_model_size(model_name) 
         if not is_safe:
             return f"<h1>Error</h1><p>{msg}</p>"
