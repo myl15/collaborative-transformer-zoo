@@ -1,65 +1,40 @@
 # main.py
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlmodel import Session, select
+from contextlib import asynccontextmanager
+
+# Import our new modules
 from visualization_logic import get_viz_data, free_memory
+from database import create_db_and_tables, get_session
+from models import Visualization
 
-app = FastAPI()
-
-# Shared CSS for centering and button styles
+# Redefine Styles if not exported from core_logic
 STYLES = """
 <style>
-    body { 
-        font-family: sans-serif; 
-        background-color: #f4f4f9;
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center; /* Centers horizontally */
-        min-height: 100vh;
-    }
-    .container {
-        background: white;
-        padding: 2rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        width: 90%;
-        max-width: 1000px; /* Prevents it from getting too wide */
-        margin-top: 2rem;
-    }
+    body { font-family: sans-serif; background-color: #f4f4f9; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    .container { background: white; padding: 2rem; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 90%; max-width: 1000px; margin-top: 2rem; }
     textarea { width: 100%; height: 100px; margin-bottom: 1rem; padding: 8px; }
     input[type="text"] { width: 100%; padding: 10px; margin-bottom: 1rem; }
-    
-    /* Button Styling */
-    .btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-weight: bold;
-        text-decoration: none;
-        display: inline-block;
-        margin-right: 10px;
-    }
+    .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; margin-right: 10px; }
     .btn-primary { background: #007bff; color: white; }
     .btn-secondary { background: #6c757d; color: white; }
     .btn-outline { border: 1px solid #007bff; color: #007bff; background: white; }
-    
-    .controls {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid #eee;
-    }
+    .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
 </style>
 """
 
+# Lifecycle: Run this when server starts
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables() # <--- Creates tables in Postgres
+    yield
+
+app = FastAPI(lifespan=lifespan)
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    # ... (Home HTML remains the same) ...
-    # (See previous response for full HTML if needed)
-    return """
+    return f"""
     <html>
         <head><title>Transformer Zoo</title>{STYLES}</head>
         <body>
@@ -80,25 +55,51 @@ async def home():
             </div>
         </body>
     </html>
-    """.format(STYLES=STYLES)
+    """
 
-# --- NEW ENDPOINT: Unload Memory ---
 @app.get("/unload")
 async def unload_and_go_home():
-    # 1. Dump the model from RAM
     free_memory()
-    # 2. Go back to start
     return RedirectResponse(url="/")
 
-@app.post("/visualize", response_class=HTMLResponse)
-async def visualize(model_name: str = Form(...), text: str = Form(...), view_type: str = Form("head")):
+# --- NEW: WRITE TO DB ---
+@app.post("/visualize")
+async def create_visualization(
+    model_name: str = Form(...), 
+    text: str = Form(...), 
+    view_type: str = Form("head"),
+    session: Session = Depends(get_session) # Inject DB session
+):
+    # 1. Generate the HTML (Expensive GPU operation)
+    html_content = get_viz_data(model_name, text, view_type)
     
-    viz_data = get_viz_data(model_name, text, view_type)
+    # 2. Save to Postgres
+    viz = Visualization(
+        model_name=model_name,
+        input_text=text,
+        view_type=view_type,
+        html_content=html_content
+    )
+    session.add(viz)
+    session.commit()
+    session.refresh(viz) # Get the new ID
     
-    other_view = "model" if view_type == "head" else "head"
-    other_label = "Switch to Model View" if view_type == "head" else "Switch to Head View"
+    # 3. Redirect to the PERMANENT URL
+    return RedirectResponse(url=f"/viz/{viz.id}", status_code=303)
 
-    # UPDATED BACK BUTTON: Points to /unload
+# --- NEW: READ FROM DB ---
+@app.get("/viz/{viz_id}", response_class=HTMLResponse)
+async def get_visualization(viz_id: int, session: Session = Depends(get_session)):
+    # 1. Fetch from DB
+    viz = session.get(Visualization, viz_id)
+    if not viz:
+        raise HTTPException(status_code=404, detail="Visualization not found")
+        
+    # 2. Determine "Switch View" logic
+    other_view = "model" if viz.view_type == "head" else "head"
+    other_label = "Switch to Model View" if viz.view_type == "head" else "Switch to Head View"
+    
+    # 3. Render
     return f"""
     <html>
       <head>
@@ -118,17 +119,21 @@ async def visualize(model_name: str = Form(...), text: str = Form(...), view_typ
         <div class="container">
             <div class="controls">
                 <a href="/unload" class="btn btn-secondary">← Back & Clear RAM</a>
-
+                
                 <form action="/visualize" method="post" style="margin:0;">
-                    <input type="hidden" name="model_name" value="{model_name}">
-                    <input type="hidden" name="text" value="{text}">
+                    <input type="hidden" name="model_name" value="{viz.model_name}">
+                    <input type="hidden" name="text" value="{viz.input_text}">
                     <input type="hidden" name="view_type" value="{other_view}">
                     <button type="submit" class="btn btn-outline">{other_label}</button>
                 </form>
             </div>
-            <h3 style="text-align:center;">{model_name} ({view_type} view)</h3>
+            
+            <h3 style="text-align:center;">
+                Viz ID: #{viz.id} | {viz.model_name} ({viz.view_type})
+            </h3>
+            
             <div style="width: 100%; display: flex; justify-content: center;">
-                {viz_data}
+                {viz.html_content}
             </div>
         </div>
       </body>

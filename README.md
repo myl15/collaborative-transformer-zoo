@@ -35,3 +35,6 @@ The following diagrams represent the initial design for the project.
 - Make sure to have huggingfacehub, fastapi[standard], bertviz, transformers, and pytorch installed
 - Create a HuggingFace account, a `.env` file, and place your key in it like `HF_TOKEN=<your_token>`
 - Run `uvicorn main:app --reload`
+
+## Docker Desktop Setup
+To create a stateful application with a postgres database, we used a docker environment which is built using `docker-compose.yml`. Before running the `uvicorn` app, make sure to open the docker desktop application and run `docker-compose up -d` in your terminal from the main folder.
