@@ -32,7 +32,7 @@ The following diagrams represent the initial design for the project.
     - Finalize demo and report
 
 ## Running Current Demo of Visualization Webpage
-- Make sure to have huggingfacehub, fastapi[standard], bertviz, transformers, and pytorch installed
+- Make sure to have all the packages in `requirements.txt` installed
 - Create a HuggingFace account, a `.env` file, and place your key in it like `HF_TOKEN=<your_token>`
 - Run `uvicorn main:app --reload`
 
