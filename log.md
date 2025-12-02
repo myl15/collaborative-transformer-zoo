@@ -5,6 +5,7 @@
 | 11/18/2025| Worked on visualization code | 3 | Myles |
 | 11/29/2025| Created Docker/Postgres database connection | 7 | Myles |
 | 12/1/2025 | Got Myles' work running on my machine, added `project_instructions.txt` and `requirements.txt` | 3 | Isaac |
+| 12/2/2025 | Pair Programming and 💔Solo Programming | 3 | Myles ➕ Isaac |
 | | **Total** | **TBD** | |
 
 <!--
