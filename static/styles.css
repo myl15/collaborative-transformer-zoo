@@ -1,0 +1,90 @@
+:root {
+  --bg: #f5f7fb;
+  --card: #ffffff;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-600: #1d4ed8;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --glass: rgba(255,255,255,0.6);
+  --radius: 12px;
+  --shadow: 0 6px 18px rgba(16,24,40,0.08);
+  --max-width: 1100px;
+}
+
+* { box-sizing: border-box; }
+html,body { height: 100%; }
+body {
+  font-family: Inter, Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial;
+  background: linear-gradient(180deg, #eef2ff 0%, var(--bg) 100%);
+  color: #0f172a;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  display: flex;
+  justify-content: center;
+  padding: 2.5rem 1rem;
+}
+
+.container {
+  background: var(--card);
+  width: 100%;
+  max-width: var(--max-width);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.75rem;
+  overflow: hidden;
+}
+
+header.site-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+header .brand { display:flex; align-items:center; gap:0.75rem; }
+.logo { width:44px; height:44px; border-radius:8px; background: linear-gradient(135deg,#6366f1,#06b6d4); display:inline-block; box-shadow: 0 4px 12px rgba(99,102,241,0.18); }
+h1 { font-size:1.25rem; margin:0; letter-spacing: -0.2px; }
+p.lead { margin:0; color:var(--muted); font-size:0.9rem; }
+
+/* Forms */
+form { margin-top: 1rem; }
+label { display:block; font-weight:600; margin-bottom:0.35rem; color:#0f172a; }
+input[type='text'], input[type='email'], input[type='password'], textarea, select {
+  width:100%; padding:10px 12px; border-radius:8px; border:1px solid #e6e9ef; background:transparent; outline:none;
+  transition: box-shadow .12s, border-color .12s;
+}
+input:focus, textarea:focus, select:focus { box-shadow: 0 4px 12px rgba(37,99,235,0.06); border-color: var(--accent-600); }
+
+.grid { display:grid; grid-template-columns: 1fr 360px; gap:1.25rem; align-items:start; }
+
+.auth-section { background: linear-gradient(180deg,#fbfdff,#ffffff); padding:1rem; border-radius:10px; border:1px solid #eef2ff; }
+.auth-tabs { display:flex; gap:0.5rem; }
+.auth-tab { padding:8px 12px; cursor:pointer; border-radius:8px; background:#f1f5f9; border:1px solid transparent; }
+.auth-tab.active { background: var(--accent); color:#fff; }
+.auth-form { margin-top:0.75rem; }
+.user-info { padding:0.75rem; background:#ecfeff; border-radius:8px; color:#064e3b; display:none; }
+.user-info.active { display:block; }
+
+/* Buttons */
+.btn { padding:10px 14px; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-weight:600; border: none; }
+.btn-primary { background:var(--accent); color:white; box-shadow: 0 6px 18px rgba(37,99,235,0.12); }
+.btn-primary:hover { background:var(--accent-600); }
+.btn-secondary { background:#f3f4f6; color:#111827; border:1px solid #e6e9ef; }
+.btn-outline { background:transparent; color:var(--accent); border:1px solid rgba(37,99,235,0.12); }
+
+/* Controls (viz page) */
+.controls { display:flex; gap:1rem; align-items:center; justify-content:space-between; margin-bottom:1rem; }
+#viz-user-info { display:flex; gap:0.5rem; align-items:center; padding:6px 10px; border-radius:8px; background: #f0fdf4; color:#065f46; font-weight:600; }
+
+/* Annotation panel */
+#annotation-panel { background: linear-gradient(180deg,#ffffff,#fbfdff); padding:1rem; border-radius:10px; border:1px solid #eef2ff; }
+#annotations-list { margin-top:0.75rem; }
+.annotation-item { padding:0.6rem; margin:0.55rem 0; background:#f8fafc; border-left:4px solid var(--accent); border-radius:8px; }
+.annotation-item .meta { color:var(--muted); font-size:0.8rem; }
+.delete-annotation { color:var(--danger); cursor:pointer; font-weight:700; margin-left:0.5rem; }
+
+/* Modal */
+#login-modal { display:none; }
+#login-modal .modal-card { width:360px; }
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr; }
+  header.site-header { flex-direction:column; align-items:flex-start; gap:0.5rem; }
+  .controls { flex-direction:column; align-items:flex-start; gap:0.5rem; }
+}

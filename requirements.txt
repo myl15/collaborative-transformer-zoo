@@ -8,4 +8,5 @@ python-dotenv
 psycopg2
 PyJWT
 python-multipart
-passlib[bcrypt]
+passlib[argon2]
+jinja2
