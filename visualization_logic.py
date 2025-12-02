@@ -185,15 +185,26 @@ def get_viz_data(model_name, text_input, view_type="head"):
             else:
                 html_obj = head_view(attention=attentions, tokens=tokens, html_action='return')
 
-        return html_obj.data
+        # Post-processing the HTML from bertviz:
+        # 1. Remove `overflow: hidden` which prevents scrolling in some contexts.
+        # 2. Inject flexbox styles directly into the <body> tag to center the
+        #    visualization within the iframe. This is more robust than modifying the <style> block.
+        html_data = html_obj.data
+        html_data = html_data.replace("overflow: hidden;", "")
+        centering_style = "display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0;"
+        html_data = html_data.replace(
+            "<body>",
+            f'<body style="{centering_style}">'
+        )
+        return html_data
 
     except OSError as ose:
-        if "401" in str(e) or "403" in str(e):
+        if "401" in str(ose) or "403" in str(ose):
             return f"""
             <h1>Access Denied</h1>
             <p>The model <code>{model_name}</code> is gated (requires acceptance of privacy policy).</p>
             <p><strong>Server Admin:</strong> Please ensure the account associated with the <code>HF_TOKEN</code> has accepted the terms for this model on Hugging Face.</p>
             """
-        return f"<h1>Error Loading Model</h1><p>{str(e)}</p>"
+        return f"<h1>Error Loading Model</h1><p>{str(ose)}</p>"
     except Exception as e:
         return f"<h1>Error Loading Model</h1><p>{str(e)}</p>"
