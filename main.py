@@ -1,12 +1,22 @@
-from fastapi import FastAPI, Form, Depends, HTTPException
+from fastapi import FastAPI, Form, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
 from contextlib import asynccontextmanager
+from datetime import timedelta
+from typing import Optional
 
 # Import our new modules
 from visualization_logic import get_viz_data, free_memory
 from database import create_db_and_tables, get_session
-from models import Visualization
+from models import Visualization, User, Annotation
+from auth import (
+    hash_password, 
+    verify_password, 
+    create_access_token,
+    get_current_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
+from annotations import router as annotations_router
 
 STYLES = """
 <style>
@@ -28,6 +38,8 @@ STYLES = """
     - Home page with form to submit model name, input text, and view type.
     - Endpoint to create visualization, store in Postgres, and redirect.
     - Endpoint to retrieve visualization from Postgres by ID.
+    - User authentication (signup/login) with JWT.
+    - Annotation endpoints for collaborative comments.
 '''
 
 # Lifecycle: Run this when server starts
@@ -37,15 +49,64 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(annotations_router)
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return f"""
     <html>
-        <head><title>Transformer Zoo</title>{STYLES}</head>
+        <head><title>Transformer Zoo</title>{STYLES}
+        <style>
+            .auth-section {{ background: #f9f9f9; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #28a745; }}
+            .auth-section h3 {{ margin-top: 0; color: #333; }}
+            .auth-tabs {{ display: flex; gap: 1rem; margin-bottom: 1rem; }}
+            .auth-tab {{ padding: 8px 16px; cursor: pointer; background: #e0e0e0; border: none; border-radius: 4px; font-weight: bold; }}
+            .auth-tab.active {{ background: #007bff; color: white; }}
+            .auth-form {{ display: none; }}
+            .auth-form.active {{ display: block; }}
+            .auth-form input {{ width: 100%; padding: 10px; margin-bottom: 1rem; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }}
+            .auth-form button {{ width: 100%; padding: 10px; margin-bottom: 0.5rem; }}
+            .user-info {{ padding: 1rem; background: #d4edda; border-radius: 4px; color: #155724; display: none; }}
+            .user-info.active {{ display: block; }}
+        </style>
+        </head>
         <body>
             <div class="container">
                 <h1>Collaborative Transformer Zoo</h1>
+                
+                <!-- Auth Section -->
+                <div class="auth-section">
+                    <div class="user-info" id="user-info">
+                        Logged in as: <strong id="username-display"></strong> 
+                        <button class="btn btn-secondary" onclick="logout()" style="float: right;">Logout</button>
+                    </div>
+                    <div id="auth-forms">
+                        <h3>Account</h3>
+                        <div class="auth-tabs">
+                            <button class="auth-tab active" onclick="switchTab('login')">Login</button>
+                            <button class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
+                        </div>
+                        
+                        <!-- Login Form -->
+                        <form class="auth-form active" id="login-form" onsubmit="handleLogin(event)">
+                            <input type="text" placeholder="Username" id="login-username" required>
+                            <input type="password" placeholder="Password" id="login-password" required>
+                            <button type="submit" class="btn btn-primary">Login</button>
+                            <p id="login-error" style="color: red; display: none;"></p>
+                        </form>
+                        
+                        <!-- Signup Form -->
+                        <form class="auth-form" id="signup-form" onsubmit="handleSignup(event)">
+                            <input type="text" placeholder="Username" id="signup-username" required>
+                            <input type="email" placeholder="Email" id="signup-email" required>
+                            <input type="password" placeholder="Password" id="signup-password" required>
+                            <button type="submit" class="btn btn-primary">Sign Up</button>
+                            <p id="signup-error" style="color: red; display: none;"></p>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Visualization Form -->
                 <form action="/visualize" method="post">
                     <label><strong>Model Name:</strong></label>
                     <input type="text" name="model_name" value="google/gemma-2b">
@@ -59,6 +120,110 @@ async def home():
                     <button type="submit" class="btn btn-primary">Visualize</button>
                 </form>
             </div>
+
+            <script>
+                // Check if logged in on page load
+                window.addEventListener('load', checkLoginStatus);
+
+                function checkLoginStatus() {{
+                    const token = localStorage.getItem('auth_token');
+                    const username = localStorage.getItem('username');
+                    if (token && username) {{
+                        document.getElementById('auth-forms').style.display = 'none';
+                        document.getElementById('user-info').classList.add('active');
+                        document.getElementById('username-display').textContent = username;
+                    }}
+                }}
+
+                function switchTab(tab) {{
+                    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+                    
+                    event.target.classList.add('active');
+                    document.getElementById(tab + '-form').classList.add('active');
+                }}
+
+                async function handleLogin(event) {{
+                    event.preventDefault();
+                    const username = document.getElementById('login-username').value;
+                    const password = document.getElementById('login-password').value;
+                    const errorEl = document.getElementById('login-error');
+
+                    try {{
+                        const formData = new FormData();
+                        formData.append('username', username);
+                        formData.append('password', password);
+
+                        const res = await fetch('/auth/login', {{
+                            method: 'POST',
+                            body: formData
+                        }});
+
+                        if (res.ok) {{
+                            const data = await res.json();
+                            localStorage.setItem('auth_token', data.access_token);
+                            localStorage.setItem('username', username);
+                            errorEl.style.display = 'none';
+                            checkLoginStatus();
+                            document.getElementById('login-username').value = '';
+                            document.getElementById('login-password').value = '';
+                        }} else {{
+                            const error = await res.json();
+                            errorEl.textContent = error.detail || 'Login failed';
+                            errorEl.style.display = 'block';
+                        }}
+                    }} catch (err) {{
+                        errorEl.textContent = 'Error: ' + err.message;
+                        errorEl.style.display = 'block';
+                    }}
+                }}
+
+                async function handleSignup(event) {{
+                    event.preventDefault();
+                    const username = document.getElementById('signup-username').value;
+                    const email = document.getElementById('signup-email').value;
+                    const password = document.getElementById('signup-password').value;
+                    const errorEl = document.getElementById('signup-error');
+
+                    try {{
+                        const formData = new FormData();
+                        formData.append('username', username);
+                        formData.append('email', email);
+                        formData.append('password', password);
+
+                        const res = await fetch('/auth/signup', {{
+                            method: 'POST',
+                            body: formData
+                        }});
+
+                        if (res.ok) {{
+                            const data = await res.json();
+                            localStorage.setItem('auth_token', data.access_token);
+                            localStorage.setItem('username', username);
+                            errorEl.style.display = 'none';
+                            checkLoginStatus();
+                            document.getElementById('signup-username').value = '';
+                            document.getElementById('signup-email').value = '';
+                            document.getElementById('signup-password').value = '';
+                        }} else {{
+                            const error = await res.json();
+                            errorEl.textContent = error.detail || 'Signup failed';
+                            errorEl.style.display = 'block';
+                        }}
+                    }} catch (err) {{
+                        errorEl.textContent = 'Error: ' + err.message;
+                        errorEl.style.display = 'block';
+                    }}
+                }}
+
+                function logout() {{
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('username');
+                    document.getElementById('user-info').classList.remove('active');
+                    document.getElementById('auth-forms').style.display = 'block';
+                    location.reload();
+                }}
+            </script>
         </body>
     </html>
     """
@@ -105,11 +270,21 @@ async def get_visualization(viz_id: int, session: Session = Depends(get_session)
     other_view = "model" if viz.view_type == "head" else "head"
     other_label = "Switch to Model View" if viz.view_type == "head" else "Switch to Head View"
     
-    # 3. Render
+    # 3. Render with annotation UI
     return f"""
     <html>
       <head>
         {STYLES}
+        <style>
+            #annotation-panel {{ margin-top: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 5px; }}
+            .annotation-item {{ padding: 0.5rem; margin: 0.5rem 0; background: #f0f0f0; border-left: 3px solid #007bff; }}
+            .annotation-item .meta {{ font-size: 0.8rem; color: #666; }}
+            .token-selected {{ background-color: #ffeb3b; cursor: pointer; }}
+            #token-input {{ width: 100%; padding: 8px; margin-bottom: 0.5rem; }}
+            #add-annotation-btn {{ padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; }}
+            #add-annotation-btn:hover {{ background: #218838; }}
+            .delete-annotation {{ font-size: 0.8rem; color: #dc3545; cursor: pointer; margin-left: 1rem; }}
+        </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
         <script>
           requirejs.config({{
@@ -120,11 +295,137 @@ async def get_visualization(viz_id: int, session: Session = Depends(get_session)
               }},
           }});
         </script>
+        <script>
+          let selectedTokens = {{}};
+          let allAnnotations = [];
+          const VIZ_ID = {viz_id};
+
+          // Load annotations on page load
+          async function loadAnnotations() {{
+            try {{
+              const res = await fetch(`/viz/${{VIZ_ID}}/annotations`);
+              if (res.ok) {{
+                allAnnotations = await res.json();
+                renderAnnotations();
+              }}
+            }} catch (err) {{
+              console.error("Failed to load annotations:", err);
+            }}
+          }}
+
+          function renderAnnotations() {{
+            const panel = document.getElementById('annotations-list');
+            if (!panel) return;
+            
+            panel.innerHTML = '';
+            allAnnotations.forEach(ann => {{
+              const div = document.createElement('div');
+              div.className = 'annotation-item';
+              const token_range = `tokens [${{ann.start_token}}:${{ann.end_token}}]`;
+              const deleteBtn = '<span class="delete-annotation" onclick="deleteAnnotation(' + ann.id + ')">✕ Delete</span>';
+              div.innerHTML = `<strong>${{ann.username}}:</strong> ${{ann.content}} <br/><span class="meta">${{token_range}} · ${{new Date(ann.created_at).toLocaleString()}}</span>${{deleteBtn}}`;
+              panel.appendChild(div);
+            }});
+          }}
+
+          async function addAnnotation() {{
+            const textarea = document.getElementById('annotation-input');
+            const content = textarea.value.trim();
+            if (!content) {{
+              alert('Please enter a comment');
+              return;
+            }}
+
+            const start = document.getElementById('start-token').value;
+            const end = document.getElementById('end-token').value;
+            
+            if (start === '' || end === '') {{
+              alert('Please select a token range');
+              return;
+            }}
+
+            const token = localStorage.getItem('auth_token');
+            if (!token) {{
+              alert('Please log in first to add annotations');
+              return;
+            }}
+
+            try {{
+              const res = await fetch(`/viz/${{VIZ_ID}}/annotations?content=${{encodeURIComponent(content)}}&start_token=${{start}}&end_token=${{end}}`, {{
+                method: 'POST',
+                headers: {{
+                  'Authorization': `Bearer ${{token}}`
+                }}
+              }});
+
+              if (res.ok) {{
+                textarea.value = '';
+                document.getElementById('start-token').value = '';
+                document.getElementById('end-token').value = '';
+                await loadAnnotations();
+              }} else {{
+                const error = await res.json();
+                alert('Error: ' + error.detail);
+              }}
+            }} catch (err) {{
+              alert('Failed to add annotation: ' + err.message);
+            }}
+          }}
+
+          async function deleteAnnotation(annotationId) {{
+            if (!confirm('Delete this annotation?')) return;
+            
+            const token = localStorage.getItem('auth_token');
+            if (!token) {{
+              alert('Please log in to delete annotations');
+              return;
+            }}
+
+            try {{
+              const res = await fetch(`/viz/annotations/${{annotationId}}`, {{
+                method: 'DELETE',
+                headers: {{
+                  'Authorization': `Bearer ${{token}}`
+                }}
+              }});
+
+              if (res.ok) {{
+                await loadAnnotations();
+              }} else {{
+                const error = await res.json();
+                alert('Error: ' + error.detail);
+              }}
+            }} catch (err) {{
+              alert('Failed to delete: ' + err.message);
+            }}
+          }}
+
+                    function checkLoginStatus() {{
+                        const token = localStorage.getItem('auth_token');
+                        const username = localStorage.getItem('username');
+                        const el = document.getElementById('viz-user-info');
+                        if (token && username && el) {{
+                            el.style.display = 'inline-block';
+                            el.textContent = `Logged in as: ${{username}}`;
+                        }} else if (el) {{
+                            el.style.display = 'none';
+                        }}
+                    }}
+
+                    function logoutFromViz() {{
+                        localStorage.removeItem('auth_token');
+                        localStorage.removeItem('username');
+                        checkLoginStatus();
+                    }}
+
+                    window.addEventListener('load', function() {{ loadAnnotations(); checkLoginStatus(); }});
+        </script>
       </head>
       <body>
         <div class="container">
             <div class="controls">
                 <a href="/unload" class="btn btn-secondary">← Back & Clear RAM</a>
+                <div id="viz-user-info" style="display:none; margin-left: 1rem; font-weight: bold; color: #155724;"></div>
                 
                 <form action="/visualize" method="post" style="margin:0;">
                     <input type="hidden" name="model_name" value="{viz.model_name}">
@@ -141,7 +442,152 @@ async def get_visualization(viz_id: int, session: Session = Depends(get_session)
             <div style="width: 100%; display: flex; justify-content: center;">
                 {viz.html_content}
             </div>
+
+            <!-- Annotation Panel -->
+            <div id="annotation-panel">
+                <h4>Collaborative Annotations</h4>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label><strong>Token Range:</strong></label><br/>
+                    Start: <input type="number" id="start-token" min="0" style="width: 80px;"> 
+                    End: <input type="number" id="end-token" min="0" style="width: 80px;">
+                    <small>(Select which tokens to annotate)</small>
+                </div>
+
+                <textarea id="annotation-input" placeholder="Add your comment here..." style="width: 100%; height: 60px; padding: 8px; margin-bottom: 0.5rem;"></textarea>
+                <button id="add-annotation-btn" onclick="addAnnotation()">Add Comment</button>
+
+                <h5>All Comments:</h5>
+                <div id="annotations-list" style="max-height: 300px; overflow-y: auto;">
+                    <p style="color: #999;">Loading annotations...</p>
+                </div>
+
+                <hr/>
+                <p style="font-size: 0.9rem; color: #666;">
+                    Not logged in? <a href="#" onclick="showLoginModal()">Click here to log in</a> to add annotations.
+                </p>
+            </div>
         </div>
+
+        <!-- Simple Login Modal -->
+        <div id="login-modal" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+            <div style="background: white; padding: 2rem; border-radius: 10px; width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                <h3>Login</h3>
+                <input type="text" id="login-username" placeholder="Username" style="width: 100%; padding: 8px; margin-bottom: 0.5rem; box-sizing: border-box;">
+                <input type="password" id="login-password" placeholder="Password" style="width: 100%; padding: 8px; margin-bottom: 1rem; box-sizing: border-box;">
+                <button onclick="performLogin()" class="btn btn-primary" style="width: 100%; margin-bottom: 0.5rem;">Login</button>
+                <button onclick="document.getElementById('login-modal').style.display='none'" class="btn btn-secondary" style="width: 100%;">Close</button>
+            </div>
+        </div>
+
+        <script>
+            function showLoginModal() {{
+                document.getElementById('login-modal').style.display = 'block';
+            }}
+
+            async function performLogin() {{
+                const username = document.getElementById('login-username').value;
+                const password = document.getElementById('login-password').value;
+                
+                if (!username || !password) {{
+                    alert('Please fill in all fields');
+                    return;
+                }}
+
+                try {{
+                    const formData = new FormData();
+                    formData.append('username', username);
+                    formData.append('password', password);
+
+                    const res = await fetch('/auth/login', {{
+                        method: 'POST',
+                        body: formData
+                    }});
+
+                    if (res.ok) {{
+                        const data = await res.json();
+                        localStorage.setItem('auth_token', data.access_token);
+                        document.getElementById('login-modal').style.display = 'none';
+                        alert('Logged in successfully!');
+                    }} else {{
+                        const error = await res.json();
+                        alert('Login failed: ' + error.detail);
+                    }}
+                }} catch (err) {{
+                    alert('Error: ' + err.message);
+                }}
+            }}
+        </script>
       </body>
     </html>
     """
+
+
+# ===== AUTH ENDPOINTS =====
+@app.post("/auth/signup")
+async def signup(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """Register a new user."""
+    # Check if user exists
+    statement = select(User).where(User.username == username)
+    existing = session.exec(statement).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already exists"
+        )
+    
+    # Check if email exists
+    statement = select(User).where(User.email == email)
+    existing = session.exec(statement).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already exists"
+        )
+    
+    # Create user
+    user = User(
+        username=username,
+        email=email,
+        hashed_password=hash_password(password)
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    # Create token
+    access_token = create_access_token(
+        data={"sub": user.id},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user.id}
+
+
+@app.post("/auth/login")
+async def login(
+    username: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """Login user and return JWT token."""
+    statement = select(User).where(User.username == username)
+    user = session.exec(statement).first()
+    
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password"
+        )
+    
+    access_token = create_access_token(
+        data={"sub": user.id},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user.id}

@@ -32,9 +32,53 @@ The following diagrams represent the initial design for the project.
     - Finalize demo and report
 
 ## Running Current Demo of Visualization Webpage
-- Make sure to have all the packages in `requirements.txt` installed
-- Create a HuggingFace account, a `.env` file, and place your key in it like `HF_TOKEN=<your_token>`
-- Run `uvicorn main:app --reload`
+
+### Prerequisites
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Set up environment variables:**
+   - Copy `.env.example` to `.env`
+   - Add your HuggingFace token: `HF_TOKEN=<your_token>`
+   - Update `SECRET_KEY` with a secure random string (for JWT authentication)
+
+3. **Start PostgreSQL via Docker:**
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Run the server:**
+   ```bash
+   uvicorn main:app --reload
+   ```
+
+   The app will be available at `http://localhost:8000`
+
+### Features
+
+#### Core Visualization
+- Submit model name and text input
+- Choose between "Head View" (attention head detail) or "Model View" (layer-wise blocks)
+- View interactive attention patterns using BertViz
+- Persistent storage with unique shareable URLs
+
+#### User Authentication (NEW)
+- **Sign up:** POST `/auth/signup` with username, email, password
+- **Login:** POST `/auth/login` with username, password
+- Returns JWT token (valid for 24 hours by default)
+- Token stored in browser's localStorage for authenticated requests
+
+#### Collaborative Annotations (NEW)
+- **Add annotations:** Select token range, add comment (requires login)
+  - POST `/viz/{id}/annotations?content=...&start_token=...&end_token=...`
+  - Header: `Authorization: Bearer <token>`
+- **View all annotations:** GET `/viz/{id}/annotations`
+- **Edit own annotations:** PATCH `/viz/annotations/{id}?content=...`
+- **Delete own annotations:** DELETE `/viz/annotations/{id}`
+- Ownership verification: only annotation authors can edit/delete
+- Timestamps track creation and updates
 
 ## Docker Desktop Setup
 To create a stateful application with a postgres database, we used a docker environment which is built using `docker-compose.yml`. Before running the `uvicorn` app, make sure to open the docker desktop application and run `docker-compose up -d` in your terminal from the main folder.

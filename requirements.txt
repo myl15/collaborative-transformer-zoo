@@ -6,3 +6,6 @@ bertviz
 huggingface_hub
 python-dotenv
 psycopg2
+PyJWT
+python-multipart
+passlib[bcrypt]
