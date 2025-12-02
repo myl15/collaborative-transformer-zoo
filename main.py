@@ -3,10 +3,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlmodel import Session, select
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Optional
+import logging
 
 # Import our new modules
 from visualization_logic import get_viz_data, free_memory
@@ -20,6 +22,16 @@ from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from annotations import router as annotations_router
+from validation import VisualizationRequest, validate_and_sanitize
+from caching import cache_viz_result, get_cache_stats, clear_cache
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+logger = logging.getLogger(__name__)
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 
 '''
@@ -38,12 +50,26 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda request, exc: HTMLResponse(
+    f"<h1>429 Too Many Requests</h1><p>{exc.detail}</p>",
+    status_code=429
+))
 # Serve static assets (CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # Setup Jinja2 templates
 templates = Jinja2Templates(directory="templates")
 app.include_router(annotations_router)
 
+
+# === CACHING WRAPPER ===
+@cache_viz_result(ttl_seconds=3600)
+def get_cached_viz_data(model_name: str, text: str, view_type: str) -> str:
+    """Wrapped GPU inference with Redis caching (1 hour TTL)."""
+    return get_viz_data(model_name, text, view_type)
+
+
+# === ROUTES ===
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request})
@@ -52,6 +78,19 @@ async def home(request: Request):
 async def unload_and_go_home():
     free_memory()
     return RedirectResponse(url="/")
+
+
+@app.get("/cache/stats")
+async def cache_statistics():
+    """Get Redis cache statistics."""
+    return get_cache_stats()
+
+
+@app.post("/cache/clear")
+async def clear_cache_endpoint():
+    """Clear all cached visualizations."""
+    success = clear_cache()
+    return {"success": success, "message": "Cache cleared" if success else "Failed to clear cache"}
 
 
 @app.get("/visualizations", response_class=HTMLResponse)
@@ -63,28 +102,46 @@ async def list_visualizations(request: Request, session: Session = Depends(get_s
 
 # --- Write to DB and Redirect ---
 @app.post("/visualize")
+@limiter.limit("5/minute")
 async def create_visualization(
+    request: Request,
     model_name: str = Form(...), 
     text: str = Form(...), 
     view_type: str = Form("head"),
-    session: Session = Depends(get_session) # Inject DB session
+    session: Session = Depends(get_session)
 ):
-    # 1. Generate the HTML (Expensive GPU operation)
-    html_content = get_viz_data(model_name, text, view_type)
-    
-    # 2. Save to Postgres
-    viz = Visualization(
-        model_name=model_name,
-        input_text=text,
-        view_type=view_type,
-        html_content=html_content
-    )
-    session.add(viz)
-    session.commit()
-    session.refresh(viz) # Get the new ID
-    
-    # 3. Redirect to the PERMANENT URL
-    return RedirectResponse(url=f"/viz/{viz.id}", status_code=303)
+    """Generate and store visualization with rate limiting and caching."""
+    try:
+        # Validate and sanitize inputs
+        viz_request = validate_and_sanitize(model_name, text, view_type)
+        
+        # Get viz (cached if possible)
+        html_content = get_cached_viz_data(
+            viz_request.model_name, 
+            viz_request.text, 
+            viz_request.view_type
+        )
+        
+        # Save to Postgres
+        viz = Visualization(
+            model_name=viz_request.model_name,
+            input_text=viz_request.text,
+            view_type=viz_request.view_type,
+            html_content=html_content
+        )
+        session.add(viz)
+        session.commit()
+        session.refresh(viz)
+        
+        logger.info(f"Created visualization {viz.id} for model {viz_request.model_name}")
+        return RedirectResponse(url=f"/viz/{viz.id}", status_code=303)
+        
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Visualization error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate visualization")
 
 # --- NEW: READ FROM DB ---
 @app.get("/viz/{viz_id}", response_class=HTMLResponse)

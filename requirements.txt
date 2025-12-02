@@ -10,3 +10,6 @@ PyJWT
 python-multipart
 passlib[argon2]
 jinja2
+slowapi
+redis
+pydantic
