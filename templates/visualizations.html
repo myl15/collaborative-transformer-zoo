@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Visualizations - Transformer Zoo</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <header class="site-header">
+        <div class="brand">
+          <span class="logo"></span>
+          <div>
+            <h1>Saved Visualizations</h1>
+            <p class="lead">Browse previously generated model visualizations.</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a href="/" class="btn btn-outline">Home</a>
+          <a href="/unload" class="btn btn-secondary">Clear RAM</a>
+        </div>
+      </header>
+
+      <main class="grid">
+        <div>
+          {% if visualizations %}
+            {% for viz in visualizations %}
+              <div class='viz-card' style='padding:12px;border-radius:8px;border:1px solid #eef2ff;margin-bottom:10px;'>
+                <a class='card-link' href="/viz/{{ viz.id }}" style="font-weight:700;color:var(--accent);text-decoration:none;">Viz #{{ viz.id }} — {{ viz.model_name }} ({{ viz.view_type }})</a>
+                <div style="color:var(--muted);margin-top:6px;font-size:0.92rem;">
+                  {% if viz.input_text %}
+                    {{ viz.input_text[:140] }}{% if viz.input_text|length > 140 %}...{% endif %}
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <p style='color:var(--muted)'>No visualizations yet.</p>
+          {% endif %}
+        </div>
+        <aside style="min-width:260px;">
+          <div style="padding:12px;border-radius:8px;border:1px solid #eef2ff;background:linear-gradient(180deg,#fff,#fbfdff);">
+            <h4 style="margin-top:0;">Quick Actions</h4>
+            <p style="margin:0 0 8px 0;color:var(--muted);">Generate a new visualization from the home page.</p>
+            <a href="/" class="btn btn-primary" style="width:100%;">Create Visualization</a>
+          </div>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>

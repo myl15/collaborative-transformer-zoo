@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Viz #{{ viz.id }} - Transformer Zoo</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+      #annotation-panel { background: linear-gradient(180deg,#ffffff,#fbfdff); padding:1rem; border-radius:10px; border:1px solid #eef2ff; margin-top: 1.5rem; }
+      #annotations-list { margin-top:0.75rem; max-height: 300px; overflow-y: auto; }
+      .annotation-item { padding:0.6rem; margin:0.55rem 0; background:#f8fafc; border-left:4px solid var(--accent); border-radius:8px; }
+      .annotation-item .meta { color:var(--muted); font-size:0.8rem; }
+      .delete-annotation { color:var(--danger); cursor:pointer; font-weight:700; margin-left:0.5rem; }
+      #add-annotation-btn { padding: 10px 14px; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-weight:600; border: none; background:var(--success); color:white; }
+      #add-annotation-btn:hover { opacity: 0.9; }
+      .viz-container { width: 100%; display: flex; justify-content: center; margin: 1.5rem 0; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+    <script>
+      requirejs.config({
+        paths: {
+          base: '/static/base',
+          "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/5.7.0/d3.min",
+          jquery: '//ajax.googleapis.com/ajax/libs/jquery/2.0.0/jquery.min',
+        },
+      });
+    </script>
+    <script>
+      let allAnnotations = [];
+      const VIZ_ID = "{{ viz.id }}";
+
+      async function loadAnnotations() {
+        try {
+          const res = await fetch(`/viz/${VIZ_ID}/annotations`);
+          if (res.ok) {
+            allAnnotations = await res.json();
+            renderAnnotations();
+          }
+        } catch (err) {
+          console.error("Failed to load annotations:", err);
+        }
+      }
+
+      function renderAnnotations() {
+        const panel = document.getElementById('annotations-list');
+        if (!panel) return;
+        
+        panel.innerHTML = '';
+        allAnnotations.forEach(ann => {
+          const div = document.createElement('div');
+          div.className = 'annotation-item';
+          const token_range = `tokens [${ann.start_token}:${ann.end_token}]`;
+          const deleteBtn = '<span class="delete-annotation" onclick="deleteAnnotation(' + ann.id + ')">✕ Delete</span>';
+          div.innerHTML = `<strong>${ann.username}:</strong> ${ann.content} <br/><span class="meta">${token_range} · ${new Date(ann.created_at).toLocaleString()}</span>${deleteBtn}`;
+          panel.appendChild(div);
+        });
+      }
+
+      async function addAnnotation() {
+        const textarea = document.getElementById('annotation-input');
+        const content = textarea.value.trim();
+        if (!content) {
+          alert('Please enter a comment');
+          return;
+        }
+
+        const start = document.getElementById('start-token').value;
+        const end = document.getElementById('end-token').value;
+        
+        if (start === '' || end === '') {
+          alert('Please select a token range');
+          return;
+        }
+
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+          alert('Please log in first to add annotations');
+          return;
+        }
+
+        try {
+          const res = await fetch(`/viz/${VIZ_ID}/annotations?content=${encodeURIComponent(content)}&start_token=${start}&end_token=${end}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (res.ok) {
+            textarea.value = '';
+            document.getElementById('start-token').value = '';
+            document.getElementById('end-token').value = '';
+            await loadAnnotations();
+          } else {
+            const error = await res.json();
+            alert('Error: ' + error.detail);
+          }
+        } catch (err) {
+          alert('Failed to add annotation: ' + err.message);
+        }
+      }
+
+      async function deleteAnnotation(annotationId) {
+        if (!confirm('Delete this annotation?')) return;
+        
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+          alert('Please log in to delete annotations');
+          return;
+        }
+
+        try {
+          const res = await fetch(`/viz/annotations/${annotationId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (res.ok) {
+            await loadAnnotations();
+          } else {
+            const error = await res.json();
+            alert('Error: ' + error.detail);
+          }
+        } catch (err) {
+          alert('Failed to delete: ' + err.message);
+        }
+      }
+
+      function checkLoginStatus() {
+        const token = localStorage.getItem('auth_token');
+        const username = localStorage.getItem('username');
+        const el = document.getElementById('viz-user-info');
+        if (token && username && el) {
+          el.style.display = 'inline-flex';
+          el.textContent = `Logged in as: ${username}`;
+        } else if (el) {
+          el.style.display = 'none';
+        }
+      }
+
+      function logoutFromViz() {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('username');
+        checkLoginStatus();
+      }
+
+      window.addEventListener('load', function() { loadAnnotations(); checkLoginStatus(); });
+    </script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="controls">
+        {% if prev_viz %}
+          <a href="/viz/{{ prev_viz.id }}" class="btn btn-secondary">← Prev</a>
+        {% else %}
+          <span class="btn btn-secondary" style="opacity:0.45;pointer-events:none;">← Prev</span>
+        {% endif %}
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          {% if next_viz %}
+            <a href="/viz/{{ next_viz.id }}" class="btn btn-secondary">Next →</a>
+          {% else %}
+            <span class="btn btn-secondary" style="opacity:0.45;pointer-events:none;">Next →</span>
+          {% endif %}
+          <a href="/visualizations" class="btn btn-outline">All Visualizations</a>
+        </div>
+        <a href="/unload" class="btn btn-secondary">← Back & Clear RAM</a>
+        <div id="viz-user-info" style="display:none; gap:0.5rem; align-items:center; padding:6px 10px; border-radius:8px; background: #f0fdf4; color:#065f46; font-weight:600;"></div>
+
+        <form action="/visualize" method="post" style="margin:0;">
+          <input type="hidden" name="model_name" value="{{ viz.model_name }}">
+          <input type="hidden" name="text" value="{{ viz.input_text }}">
+          <input type="hidden" name="view_type" value="{{ other_view }}">
+          <button type="submit" class="btn btn-outline">{{ other_label }}</button>
+        </form>
+      </div>
+      
+      <h3 style="text-align:center;">Viz ID: #{{ viz.id }} | {{ viz.model_name }} ({{ viz.view_type }})</h3>
+      
+      <div class="viz-container">
+        {{ viz.html_content|safe }}
+      </div>
+
+      <!-- Annotation Panel -->
+      <div id="annotation-panel">
+        <h4>Collaborative Annotations</h4>
+        
+        <div style="margin-bottom: 1rem;">
+          <label><strong>Token Range:</strong></label><br/>
+          Start: <input type="number" id="start-token" min="0" style="width: 80px;"> 
+          End: <input type="number" id="end-token" min="0" style="width: 80px;">
+          <small>(Select which tokens to annotate)</small>
+        </div>
+
+        <textarea id="annotation-input" placeholder="Add your comment here..." style="width: 100%; height: 60px; padding: 8px; margin-bottom: 0.5rem;"></textarea>
+        <button id="add-annotation-btn" onclick="addAnnotation()">Add Comment</button>
+
+        <h5>All Comments:</h5>
+        <div id="annotations-list">
+          <p style="color: #999;">Loading annotations...</p>
+        </div>
+
+        <hr/>
+        <p style="font-size: 0.9rem; color: #666;">
+          Not logged in? <a href="#" onclick="showLoginModal(); return false;">Click here to log in</a> to add annotations.
+        </p>
+      </div>
+    </div>
+
+    <!-- Simple Login Modal -->
+    <div id="login-modal" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+      <div style="background: white; padding: 2rem; border-radius: 10px; width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+        <h3>Login</h3>
+        <input type="text" id="login-username" placeholder="Username" style="width: 100%; padding: 8px; margin-bottom: 0.5rem; box-sizing: border-box;">
+        <input type="password" id="login-password" placeholder="Password" style="width: 100%; padding: 8px; margin-bottom: 1rem; box-sizing: border-box;">
+        <button onclick="performLogin()" class="btn btn-primary" style="width: 100%; margin-bottom: 0.5rem;">Login</button>
+        <button onclick="document.getElementById('login-modal').style.display='none'" class="btn btn-secondary" style="width: 100%;">Close</button>
+      </div>
+    </div>
+
+    <script>
+      function showLoginModal() {
+        document.getElementById('login-modal').style.display = 'block';
+      }
+
+      async function performLogin() {
+        const username = document.getElementById('login-username').value;
+        const password = document.getElementById('login-password').value;
+        
+        if (!username || !password) {
+          alert('Please fill in all fields');
+          return;
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append('username', username);
+          formData.append('password', password);
+
+          const res = await fetch('/auth/login', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('auth_token', data.access_token);
+            localStorage.setItem('username', username);
+            document.getElementById('login-modal').style.display = 'none';
+            checkLoginStatus();
+            alert('Logged in successfully!');
+          } else {
+            const error = await res.json();
+            alert('Login failed: ' + error.detail);
+          }
+        } catch (err) {
+          alert('Error: ' + err.message);
+        }
+      }
+    </script>
+  </body>
+</html>
