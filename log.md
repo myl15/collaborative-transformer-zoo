@@ -7,9 +7,9 @@
 | 12/1/2025 | Got Myles' work running on my machine, added `project_instructions.txt` and `requirements.txt` | 3 | Isaac | 9AM - 12PM |
 | 12/1/2025 | Added users, annotations, and making things prettier | 5 | Isaac | 7PM - 12AM |
 | 12/2/2025 | Added rate limiting, input validation, Redis caching | 7 | Isaac | 8AM - 3PM |
-| ? | Added search/filter/pagination, export/download, permissions/sharing, monitoring, observability | ? | Isaac | ? |
+| 12/4/2025 | Added search/filter/pagination, export/download, permissions/sharing, monitoring, observability | 3 | Isaac | 8AM - 11AM |
 | | **Myles Total** | **TBD** | |
-| | **Isaac Total** | **17.5** | |
+| | **Isaac Total** | **20.5** | |
 
 
 <!--
