@@ -18,7 +18,7 @@ class VisualizationRequest(BaseModel):
     def validate_model_name(cls, v):
         """Ensure model_name is safe and reasonable."""
         # Allow alphanumeric, hyphens, underscores, and slashes (org/model format)
-        if not re.match(r'^[a-zA-Z0-9/_-]+$', v):
+        if not re.match(r'^[a-zA-Z0-9/._-]+$', v):
             raise ValueError('model_name contains invalid characters')
         # Prevent path traversal
         if '..' in v or v.startswith('/'):
