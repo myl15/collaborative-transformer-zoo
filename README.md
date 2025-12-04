@@ -64,13 +64,13 @@ The following diagrams represent the initial design for the project.
 - View interactive attention patterns using BertViz
 - Persistent storage with unique shareable URLs
 
-#### User Authentication (NEW)
+#### User Authentication
 - **Sign up:** POST `/auth/signup` with username, email, password
 - **Login:** POST `/auth/login` with username, password
 - Returns JWT token (valid for 24 hours by default)
 - Token stored in browser's localStorage for authenticated requests
 
-#### Collaborative Annotations (NEW)
+#### Collaborative Annotations
 - **Add annotations:** Select token range, add comment (requires login)
   - POST `/viz/{id}/annotations?content=...&start_token=...&end_token=...`
   - Header: `Authorization: Bearer <token>`
@@ -79,6 +79,21 @@ The following diagrams represent the initial design for the project.
 - **Delete own annotations:** DELETE `/viz/annotations/{id}`
 - Ownership verification: only annotation authors can edit/delete
 - Timestamps track creation and updates
+
+#### Production Hardening
+- **Rate Limiting:** 5 requests/minute per IP on `/visualize` endpoint
+  - Prevents GPU exhaustion from spam/DoS attacks
+  - Returns HTTP 429 when limit exceeded
+- **Input Validation:** Pydantic-based sanitization
+  - Blocks path traversal (`../`, leading `/`)
+  - Blocks SQL injection (`';--`)
+  - Blocks XSS attacks (`<script>`)
+  - Validates model names, text length, view types
+- **Redis Caching:** 1-hour TTL on inference results
+  - Caches expensive GPU computations
+  - 50-240x faster response times for cache hits
+  - `/cache/stats` endpoint shows cache metrics
+  - `/cache/clear` endpoint allows manual cache clearing
 
 ## Docker Desktop Setup
 To create a stateful application with a postgres database, we used a docker environment which is built using `docker-compose.yml`. Before running the `uvicorn` app, make sure to open the docker desktop application and run `docker-compose up -d` in your terminal from the main folder.
