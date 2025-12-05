@@ -42,8 +42,17 @@ class Annotation(SQLModel, table=True):
     viz_id: int = Field(foreign_key="visualization.id")
     user_id: int = Field(foreign_key="user.id")
     content: str
-    start_token: int  # Index of start token
-    end_token: int  # Index of end token
+    
+    # Make tokens optional
+    start_token: Optional[int] = None
+    end_token: Optional[int] = None
+    
+    # Add coordinate fields (using float for percentages, e.g., 50.5%)
+    x_pos: Optional[float] = None
+    y_pos: Optional[float] = None
+
+    attention_type: Optional[str] = Field(default="All")
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     

@@ -209,13 +209,189 @@ async def get_visualization_content(viz_id: int, session: Session = Depends(get_
     raw_html = viz.html_content
     centering_style = """
     <style>
-        body { display: flex; justify-content: center; align-items: flex-start; margin: 0; padding-top: 20px; width: 100%; }
+        body { position: relative; display: flex; justify-content: center; margin: 0; padding-top: 20px; width: 100%; min-height: 100vh; }
         #bertviz { margin: auto; }
+        
+        /* Pin Style */
+        .viz-pin {
+            position: absolute;
+            width: 12px; height: 12px;
+            background-color: #dc2626;
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
+            z-index: 1000;
+            transform: translate(-50%, -50%); /* Center on the coordinate */
+            transition: transform 0.2s;
+        }
+        .viz-pin:hover { transform: translate(-50%, -50%) scale(1.5); }
+        
+        /* Tooltip Style */
+        .pin-tooltip {
+            visibility: hidden;
+            position: absolute;
+            bottom: 150%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #1e293b;
+            color: #fff;
+            text-align: center;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1001;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .pin-tooltip::after {
+            content: "";
+            position: absolute;
+            top: 100%; left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #1e293b transparent transparent transparent;
+        }
+        .viz-pin:hover .pin-tooltip { visibility: visible; opacity: 1; }
     </style>
     """
-    if "</head>" in raw_html:
-        return raw_html.replace("</head>", f"{centering_style}</head>")
-    return centering_style + raw_html
+
+    # JS for Interaction (Includes Temporary Pin Logic)
+    # JS for Context-Aware Pins
+    injection_script = f"""
+    <script>
+        const VIZ_ID = {viz_id};
+        let currentAttentionType = "All"; // Default
+
+        document.addEventListener("DOMContentLoaded", async function() {{
+            const vizContainer = document.getElementById('bertviz') || document.body;
+            vizContainer.style.position = 'relative';
+
+            // --- A. DETECT BERTVIZ DROPDOWN ---
+            // BertViz usually puts a <select> at the top for Encoder/Decoder switching.
+            // We look for it and listen for changes.
+            const selects = document.querySelectorAll("select");
+            let viewSelect = null;
+            
+            // Heuristic: The attention selector usually has options like "Encoder", "Decoder"
+            selects.forEach(s => {{
+                if (s.innerHTML.includes("Encoder") || s.innerHTML.includes("Cross")) {{
+                    viewSelect = s;
+                }}
+            }});
+
+            if (viewSelect) {{
+                // Set initial value
+                currentAttentionType = viewSelect.value;
+                console.log("Detected View Context:", currentAttentionType);
+
+                // Listen for changes
+                // Note: BertViz uses jQuery, so standard 'change' events might be intercepted, 
+                // but usually bubbling works or we can poll.
+                viewSelect.addEventListener("change", function(e) {{
+                    currentAttentionType = e.target.value;
+                    updatePinVisibility();
+                }});
+            }}
+
+            // --- B. FETCH PINS ---
+            try {{
+                const res = await fetch(`/viz/${{VIZ_ID}}/annotations`);
+                if (res.ok) {{
+                    const annotations = await res.json();
+                    annotations.forEach(ann => {{
+                        if (ann.x_pos != null && ann.y_pos != null) {{
+                            createPin(ann);
+                        }}
+                    }});
+                    updatePinVisibility(); // Initial filter
+                }}
+            }} catch (err) {{ console.error(err); }}
+
+            // --- C. RIGHT CLICK ---
+            vizContainer.addEventListener("contextmenu", function(e) {{
+                e.preventDefault();
+                e.stopPropagation(); 
+                
+                const rect = vizContainer.getBoundingClientRect();
+                const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+                const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+
+                // Draw temp pin ONLY if it matches current view
+                drawTempPin(xPercent, yPercent);
+
+                window.parent.postMessage({{
+                    type: 'COORD_CLICK',
+                    x: xPercent,
+                    y: yPercent,
+                    attention_type: currentAttentionType // SEND CONTEXT
+                }}, "*");
+            }});
+
+            // --- D. HELPER FUNCTIONS ---
+            
+            function createPin(ann) {{
+                const pin = document.createElement('div');
+                pin.className = 'viz-pin';
+                pin.style.left = ann.x_pos + '%';
+                pin.style.top = ann.y_pos + '%';
+                
+                // Store context on the element itself
+                pin.dataset.context = ann.attention_type || "All"; 
+                
+                const tooltip = document.createElement('span');
+                tooltip.className = 'pin-tooltip';
+                tooltip.innerHTML = `<strong>${{ann.username}}</strong>: ${{ann.content}}`;
+                
+                pin.appendChild(tooltip);
+                vizContainer.appendChild(pin);
+            }}
+
+            function updatePinVisibility() {{
+                const pins = document.querySelectorAll('.viz-pin');
+                pins.forEach(p => {{
+                    // Show if:
+                    // 1. Pin is "All" (global)
+                    // 2. Pin matches current context
+                    // 3. Pin is the "Temp" pin (always show)
+                    if (p.id === 'temp-viz-pin') return;
+
+                    const pinContext = p.dataset.context;
+                    if (pinContext === "All" || pinContext === currentAttentionType) {{
+                        p.style.display = 'block';
+                    }} else {{
+                        p.style.display = 'none';
+                    }}
+                }});
+            }}
+
+            function drawTempPin(x, y) {{
+                const existing = document.getElementById('temp-viz-pin');
+                if (existing) existing.remove();
+
+                const pin = document.createElement('div');
+                pin.id = 'temp-viz-pin';
+                pin.className = 'viz-pin';
+                pin.style.left = x + '%';
+                pin.style.top = y + '%';
+                pin.style.backgroundColor = '#2563eb';
+                pin.style.zIndex = '2000';
+                vizContainer.appendChild(pin);
+            }}
+        }});
+    </script>
+    """
+
+    # Inject
+    modified_html = raw_html
+    if "</head>" in modified_html:
+        modified_html = modified_html.replace("</head>", f"{centering_style}{injection_script}</head>")
+    else:
+        modified_html = centering_style + injection_script + modified_html
+        
+    return modified_html
 
 @app.get("/viz/{viz_id}", response_class=HTMLResponse)
 async def get_visualization(
