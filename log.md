@@ -9,5 +9,7 @@
 | 12/2/2025 | Added rate limiting, input validation, Redis caching | 7 | Isaac | 8AM - 3PM |
 | 12/2/2025 | Myles and Isaac Pair Programming | 3 | Myles | |
 | 12/4/2025 | Added search/filter/pagination, export/download, permissions/sharing, monitoring, observability | 3 | Isaac | 8AM - 11AM |
-| | **Myles Total** | **15.5** | |
+| 12/4/2025 | Began Pin Dropping Functionality | 3 | Myles | |
+| 12/5/2025 | Finished Pin Dropping Functionality | 2.5 | Myles | 8AM-10:30AM |
+| | **Myles Total** | **21** | |
 | | **Isaac Total** | **20.5** | |
