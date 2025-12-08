@@ -19,8 +19,6 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Optional
 import logging
-
-# Import modules
 from visualization_logic import get_viz_data, free_memory
 from database import create_db_and_tables, get_session
 from models import Visualization, User, Annotation, AuditLog
@@ -45,7 +43,7 @@ logging.basicConfig(level=logging.INFO)
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
-# Lifecycle: Run this when server starts
+# Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables() 
@@ -66,15 +64,13 @@ templates = Jinja2Templates(directory="templates")
 app.include_router(annotations_router)
 
 
-# === CACHING WRAPPER ===
+# === CACHING WRAPPER === #
 @cache_viz_result(ttl_seconds=3600)
 def get_cached_viz_data(model_name: str, text: str, view_type: str) -> str:
     return get_viz_data(model_name, text, view_type)
 
 
-# === ROUTES ===
-
-# 3. FIXED HOME ROUTE: Uses Template instead of f-string
+# === ROUTES === #
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -123,6 +119,14 @@ async def list_visualizations(
     limit: int = Query(20, ge=1, le=200),
     session: Session = Depends(get_session),
 ):
+    """
+    List visualizations with optional filtering and pagination.
+    1. Filter by model name
+    2. Filter by search text in input_text
+    3. Filter by date range
+    4. Pagination
+    """
+
     stmt = select(Visualization)
     if model:
         stmt = stmt.where(Visualization.model_name == model)
@@ -158,6 +162,10 @@ async def create_visualization(
     session: Session = Depends(get_session),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    """ 
+    Create a new visualization.
+    """
+
     start = time.perf_counter()
     try:
         viz_request = validate_and_sanitize(model_name, text, view_type)
@@ -201,6 +209,10 @@ async def create_visualization(
 
 @app.get("/viz/{viz_id}/content", response_class=HTMLResponse)
 async def get_visualization_content(viz_id: int, session: Session = Depends(get_session)):
+    """
+    Return the HTML content of a visualization with injected JS/CSS for annotations.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -258,7 +270,6 @@ async def get_visualization_content(viz_id: int, session: Session = Depends(get_
     </style>
     """
 
-    # JS for Interaction (Includes Temporary Pin Logic)
     # JS for Context-Aware Pins
     injection_script = f"""
     <script>
@@ -401,6 +412,10 @@ async def get_visualization(
     current_user: Optional[User] = Depends(get_current_user_optional),
     session: Session = Depends(get_session),
 ):
+    """
+    Render the visualization page with annotations support.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -434,8 +449,13 @@ async def get_visualization(
 
 
 @app.get("/viz/{viz_id}/export")
-async def export_visualization(viz_id: int, session: Session = Depends(get_session), current_user: Optional[User] = Depends(get_current_user_optional)):
-    """Export visualization metadata + annotations as JSON."""
+async def export_visualization(viz_id: int, 
+                               session: Session = Depends(get_session), 
+                               current_user: Optional[User] = Depends(get_current_user_optional)):
+    """
+    Export visualization metadata + annotations as JSON.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -482,7 +502,10 @@ def _serialize_annotation(a: Annotation) -> dict:
 
 @app.get("/viz/{viz_id}/export.csv")
 async def export_visualization_csv(viz_id: int, session: Session = Depends(get_session), current_user: Optional[User] = Depends(get_current_user_optional)):
-    """Return a CSV representation of the visualization + annotations."""
+    """
+    Return a CSV representation of the visualization + annotations.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -510,7 +533,10 @@ async def export_visualization_csv(viz_id: int, session: Session = Depends(get_s
 
 @app.get("/viz/{viz_id}/export.zip")
 async def export_visualization_zip(viz_id: int, session: Session = Depends(get_session), current_user: Optional[User] = Depends(get_current_user_optional)):
-    """Return a ZIP containing the HTML, JSON metadata, and CSV export."""
+    """
+    Return a ZIP containing the HTML, JSON metadata, and CSV export.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -552,7 +578,10 @@ async def export_visualization_zip(viz_id: int, session: Session = Depends(get_s
 
 @app.post("/viz/{viz_id}/share")
 async def generate_share_token(viz_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    """Owner-only: generate or reset a share_token and optionally make public."""
+    """
+    Owner-only: generate or reset a share_token and optionally make public.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -575,7 +604,10 @@ async def generate_share_token(viz_id: int, session: Session = Depends(get_sessi
 
 @app.get("/user/{user_id}/export.csv")
 async def export_user_csv(user_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    """Export all visualizations for a user as CSV (owner-only)."""
+    """
+    Export all visualizations for a user as CSV (owner-only).
+    """
+
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
@@ -592,7 +624,7 @@ async def export_user_csv(user_id: int, session: Session = Depends(get_session),
     return StreamingResponse(io.BytesIO(output.getvalue().encode("utf-8")), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=user_{user_id}_visualizations.csv"})
 
 
-# ===== AUTH ENDPOINTS =====
+# ==== AUTH ENDPOINTS ==== #
 @app.post("/auth/signup")
 async def signup(
     username: str = Form(...),
@@ -600,7 +632,10 @@ async def signup(
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    """Register a new user."""
+    """
+    Register a new user.
+    """
+
     # Check if user exists
     statement = select(User).where(User.username == username)
     existing = session.exec(statement).first()
@@ -644,7 +679,10 @@ async def login(
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    """Login user and return JWT token."""
+    """
+    Login user and return JWT token.
+    """
+    
     statement = select(User).where(User.username == username)
     user = session.exec(statement).first()
     
