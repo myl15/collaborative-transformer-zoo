@@ -19,8 +19,6 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Optional
 import logging
-
-# Import modules
 from visualization_logic import get_viz_data, free_memory
 from database import create_db_and_tables, get_session
 from models import Visualization, User, Annotation, AuditLog
@@ -45,7 +43,7 @@ logging.basicConfig(level=logging.INFO)
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
-# Lifecycle: Run this when server starts
+# Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables() 
@@ -66,15 +64,13 @@ templates = Jinja2Templates(directory="templates")
 app.include_router(annotations_router)
 
 
-# === CACHING WRAPPER ===
+# === CACHING WRAPPER === #
 @cache_viz_result(ttl_seconds=3600)
 def get_cached_viz_data(model_name: str, text: str, view_type: str) -> str:
     return get_viz_data(model_name, text, view_type)
 
 
-# === ROUTES ===
-
-# 3. FIXED HOME ROUTE: Uses Template instead of f-string
+# === ROUTES === #
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -123,6 +119,14 @@ async def list_visualizations(
     limit: int = Query(20, ge=1, le=200),
     session: Session = Depends(get_session),
 ):
+    """
+    List visualizations with optional filtering and pagination.
+    1. Filter by model name
+    2. Filter by search text in input_text
+    3. Filter by date range
+    4. Pagination
+    """
+
     stmt = select(Visualization)
     if model:
         stmt = stmt.where(Visualization.model_name == model)
@@ -158,6 +162,10 @@ async def create_visualization(
     session: Session = Depends(get_session),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    """ 
+    Create a new visualization.
+    """
+
     start = time.perf_counter()
     try:
         viz_request = validate_and_sanitize(model_name, text, view_type)
@@ -201,6 +209,10 @@ async def create_visualization(
 
 @app.get("/viz/{viz_id}/content", response_class=HTMLResponse)
 async def get_visualization_content(viz_id: int, session: Session = Depends(get_session)):
+    """
+    Return the HTML content of a visualization with injected JS/CSS for annotations.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -209,13 +221,188 @@ async def get_visualization_content(viz_id: int, session: Session = Depends(get_
     raw_html = viz.html_content
     centering_style = """
     <style>
-        body { display: flex; justify-content: center; align-items: flex-start; margin: 0; padding-top: 20px; width: 100%; }
+        body { position: relative; display: flex; justify-content: center; margin: 0; padding-top: 20px; width: 100%; min-height: 100vh; }
         #bertviz { margin: auto; }
+        
+        /* Pin Style */
+        .viz-pin {
+            position: absolute;
+            width: 12px; height: 12px;
+            background-color: #dc2626;
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
+            z-index: 1000;
+            transform: translate(-50%, -50%); /* Center on the coordinate */
+            transition: transform 0.2s;
+        }
+        .viz-pin:hover { transform: translate(-50%, -50%) scale(1.5); }
+        
+        /* Tooltip Style */
+        .pin-tooltip {
+            visibility: hidden;
+            position: absolute;
+            bottom: 150%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #1e293b;
+            color: #fff;
+            text-align: center;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1001;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .pin-tooltip::after {
+            content: "";
+            position: absolute;
+            top: 100%; left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #1e293b transparent transparent transparent;
+        }
+        .viz-pin:hover .pin-tooltip { visibility: visible; opacity: 1; }
     </style>
     """
-    if "</head>" in raw_html:
-        return raw_html.replace("</head>", f"{centering_style}</head>")
-    return centering_style + raw_html
+
+    # JS for Context-Aware Pins
+    injection_script = f"""
+    <script>
+        const VIZ_ID = {viz_id};
+        let currentAttentionType = "All"; // Default
+
+        document.addEventListener("DOMContentLoaded", async function() {{
+            const vizContainer = document.getElementById('bertviz') || document.body;
+            vizContainer.style.position = 'relative';
+
+            // --- A. DETECT BERTVIZ DROPDOWN ---
+            // BertViz usually puts a <select> at the top for Encoder/Decoder switching.
+            // We look for it and listen for changes.
+            const selects = document.querySelectorAll("select");
+            let viewSelect = null;
+            
+            // Heuristic: The attention selector usually has options like "Encoder", "Decoder"
+            selects.forEach(s => {{
+                if (s.innerHTML.includes("Encoder") || s.innerHTML.includes("Cross")) {{
+                    viewSelect = s;
+                }}
+            }});
+
+            if (viewSelect) {{
+                // Set initial value
+                currentAttentionType = viewSelect.value;
+                console.log("Detected View Context:", currentAttentionType);
+
+                // Listen for changes
+                // Note: BertViz uses jQuery, so standard 'change' events might be intercepted, 
+                // but usually bubbling works or we can poll.
+                viewSelect.addEventListener("change", function(e) {{
+                    currentAttentionType = e.target.value;
+                    updatePinVisibility();
+                }});
+            }}
+
+            // --- B. FETCH PINS ---
+            try {{
+                const res = await fetch(`/viz/${{VIZ_ID}}/annotations`);
+                if (res.ok) {{
+                    const annotations = await res.json();
+                    annotations.forEach(ann => {{
+                        if (ann.x_pos != null && ann.y_pos != null) {{
+                            createPin(ann);
+                        }}
+                    }});
+                    updatePinVisibility(); // Initial filter
+                }}
+            }} catch (err) {{ console.error(err); }}
+
+            // --- C. RIGHT CLICK ---
+            vizContainer.addEventListener("contextmenu", function(e) {{
+                e.preventDefault();
+                e.stopPropagation(); 
+                
+                const rect = vizContainer.getBoundingClientRect();
+                const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+                const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+
+                // Draw temp pin ONLY if it matches current view
+                drawTempPin(xPercent, yPercent);
+
+                window.parent.postMessage({{
+                    type: 'COORD_CLICK',
+                    x: xPercent,
+                    y: yPercent,
+                    attention_type: currentAttentionType // SEND CONTEXT
+                }}, "*");
+            }});
+
+            // --- D. HELPER FUNCTIONS ---
+            
+            function createPin(ann) {{
+                const pin = document.createElement('div');
+                pin.className = 'viz-pin';
+                pin.style.left = ann.x_pos + '%';
+                pin.style.top = ann.y_pos + '%';
+                
+                // Store context on the element itself
+                pin.dataset.context = ann.attention_type || "All"; 
+                
+                const tooltip = document.createElement('span');
+                tooltip.className = 'pin-tooltip';
+                tooltip.innerHTML = `<strong>${{ann.username}}</strong>: ${{ann.content}}`;
+                
+                pin.appendChild(tooltip);
+                vizContainer.appendChild(pin);
+            }}
+
+            function updatePinVisibility() {{
+                const pins = document.querySelectorAll('.viz-pin');
+                pins.forEach(p => {{
+                    // Show if:
+                    // 1. Pin is "All" (global)
+                    // 2. Pin matches current context
+                    // 3. Pin is the "Temp" pin (always show)
+                    if (p.id === 'temp-viz-pin') return;
+
+                    const pinContext = p.dataset.context;
+                    if (pinContext === "All" || pinContext === currentAttentionType) {{
+                        p.style.display = 'block';
+                    }} else {{
+                        p.style.display = 'none';
+                    }}
+                }});
+            }}
+
+            function drawTempPin(x, y) {{
+                const existing = document.getElementById('temp-viz-pin');
+                if (existing) existing.remove();
+
+                const pin = document.createElement('div');
+                pin.id = 'temp-viz-pin';
+                pin.className = 'viz-pin';
+                pin.style.left = x + '%';
+                pin.style.top = y + '%';
+                pin.style.backgroundColor = '#2563eb';
+                pin.style.zIndex = '2000';
+                vizContainer.appendChild(pin);
+            }}
+        }});
+    </script>
+    """
+
+    # Inject
+    modified_html = raw_html
+    if "</head>" in modified_html:
+        modified_html = modified_html.replace("</head>", f"{centering_style}{injection_script}</head>")
+    else:
+        modified_html = centering_style + injection_script + modified_html
+        
+    return modified_html
 
 @app.get("/viz/{viz_id}", response_class=HTMLResponse)
 async def get_visualization(
@@ -225,6 +412,10 @@ async def get_visualization(
     current_user: Optional[User] = Depends(get_current_user_optional),
     session: Session = Depends(get_session),
 ):
+    """
+    Render the visualization page with annotations support.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -258,8 +449,13 @@ async def get_visualization(
 
 
 @app.get("/viz/{viz_id}/export")
-async def export_visualization(viz_id: int, session: Session = Depends(get_session), current_user: Optional[User] = Depends(get_current_user_optional)):
-    """Export visualization metadata + annotations as JSON."""
+async def export_visualization(viz_id: int, 
+                               session: Session = Depends(get_session), 
+                               current_user: Optional[User] = Depends(get_current_user_optional)):
+    """
+    Export visualization metadata + annotations as JSON.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -306,7 +502,10 @@ def _serialize_annotation(a: Annotation) -> dict:
 
 @app.get("/viz/{viz_id}/export.csv")
 async def export_visualization_csv(viz_id: int, session: Session = Depends(get_session), current_user: Optional[User] = Depends(get_current_user_optional)):
-    """Return a CSV representation of the visualization + annotations."""
+    """
+    Return a CSV representation of the visualization + annotations.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -334,7 +533,10 @@ async def export_visualization_csv(viz_id: int, session: Session = Depends(get_s
 
 @app.get("/viz/{viz_id}/export.zip")
 async def export_visualization_zip(viz_id: int, session: Session = Depends(get_session), current_user: Optional[User] = Depends(get_current_user_optional)):
-    """Return a ZIP containing the HTML, JSON metadata, and CSV export."""
+    """
+    Return a ZIP containing the HTML, JSON metadata, and CSV export.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -376,7 +578,10 @@ async def export_visualization_zip(viz_id: int, session: Session = Depends(get_s
 
 @app.post("/viz/{viz_id}/share")
 async def generate_share_token(viz_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    """Owner-only: generate or reset a share_token and optionally make public."""
+    """
+    Owner-only: generate or reset a share_token and optionally make public.
+    """
+
     viz = session.get(Visualization, viz_id)
     if not viz:
         raise HTTPException(status_code=404, detail="Visualization not found")
@@ -399,7 +604,10 @@ async def generate_share_token(viz_id: int, session: Session = Depends(get_sessi
 
 @app.get("/user/{user_id}/export.csv")
 async def export_user_csv(user_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    """Export all visualizations for a user as CSV (owner-only)."""
+    """
+    Export all visualizations for a user as CSV (owner-only).
+    """
+
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
@@ -416,7 +624,7 @@ async def export_user_csv(user_id: int, session: Session = Depends(get_session),
     return StreamingResponse(io.BytesIO(output.getvalue().encode("utf-8")), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=user_{user_id}_visualizations.csv"})
 
 
-# ===== AUTH ENDPOINTS =====
+# ==== AUTH ENDPOINTS ==== #
 @app.post("/auth/signup")
 async def signup(
     username: str = Form(...),
@@ -424,7 +632,10 @@ async def signup(
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    """Register a new user."""
+    """
+    Register a new user.
+    """
+
     # Check if user exists
     statement = select(User).where(User.username == username)
     existing = session.exec(statement).first()
@@ -468,7 +679,10 @@ async def login(
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    """Login user and return JWT token."""
+    """
+    Login user and return JWT token.
+    """
+    
     statement = select(User).where(User.username == username)
     user = session.exec(statement).first()
     

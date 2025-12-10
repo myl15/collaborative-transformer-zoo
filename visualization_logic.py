@@ -89,13 +89,13 @@ def move_to_cpu(tensors):
     return tensors.cpu()
 
 def check_model_size(model_name_string, limit_gb=6.0):
-    '''
+    """
     Checks the size of a Hugging Face model before loading.
     Returns (is_safe: bool, message: str)
     
     :param model_name_string: Hugging Face model name or path
     :param limit_gb: Maximum allowed model size in gigabytes
-    '''
+    """
     api = HfApi()
     try:
         info = api.model_info(model_name_string, files_metadata=True)
@@ -122,14 +122,14 @@ def check_model_size(model_name_string, limit_gb=6.0):
 
 
 def get_viz_data(model_name, text_input, view_type="head"):
-    '''
+    """
     Main function to get visualization HTML data for a given model and input text.
     Handles model loading, input processing, and visualization generation.
     
     :param model_name: Hugging Face model name or path
     :param text_input: Input text to the model
     :param view_type: Type of visualization ("head" or "model")
-    '''
+    """
     # A. Check Size (Only if we are about to load a NEW model)
     if MODEL_CACHE["name"] != model_name:
         is_safe, msg = check_model_size(model_name) 

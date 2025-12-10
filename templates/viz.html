@@ -4,38 +4,13 @@
     <title>Viz #{{ viz.id }} - Transformer Zoo</title>
     <link rel="stylesheet" href="/static/styles.css">
     <style>
-      /* --- FIX 1: Make the panel grey so it stands out from the white page --- */
-      #annotation-panel { 
-          background: #f8fafc; /* Light Grey */
-          padding: 1.5rem; 
-          border-radius: 10px; 
-          border: 1px solid #cbd5e1; /* Visible Slate Border */
-          margin-top: 1.5rem; 
-      }
-      
+      #annotation-panel { background: linear-gradient(180deg,#ffffff,#fbfdff); padding:1rem; border-radius:10px; border:1px solid #eef2ff; margin-top: 1.5rem; }
       #annotations-list { margin-top:0.75rem; max-height: 300px; overflow-y: auto; }
-      
-      .annotation-item { padding:0.6rem; margin:0.55rem 0; background:#ffffff; border: 1px solid #e2e8f0; border-left:4px solid #2563eb; border-radius:8px; }
-      .annotation-item .meta { color:#64748b; font-size:0.8rem; }
-      
-      .delete-annotation { color:#dc2626; cursor:pointer; font-weight:700; margin-left:0.5rem; }
-      
-      /* --- FIX 2: HARDCODED COLORS (No Variables) --- */
-      /* This ensures the button is visible even if styles.css fails to load */
-      #add-annotation-btn { 
-          padding: 10px 14px; 
-          border-radius:8px; 
-          cursor:pointer; 
-          display:inline-flex; 
-          align-items:center; 
-          gap:8px; 
-          font-weight:600; 
-          border: none; 
-          background: #16a34a !important; /* FORCE GREEN */
-          color: white !important;         /* FORCE WHITE TEXT */
-      }
+      .annotation-item { padding:0.6rem; margin:0.55rem 0; background:#f8fafc; border-left:4px solid var(--accent); border-radius:8px; }
+      .annotation-item .meta { color:var(--muted); font-size:0.8rem; }
+      .delete-annotation { color:var(--danger); cursor:pointer; font-weight:700; margin-left:0.5rem; }
+      #add-annotation-btn { padding: 10px 14px; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-weight:600; border: none; background:var(--success); color:white; }
       #add-annotation-btn:hover { opacity: 0.9; }
-      
       .viz-container { width: 100%; display: flex; justify-content: center; margin: 1.5rem 0; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
@@ -69,39 +44,74 @@
         if (!panel) return;
         
         panel.innerHTML = '';
-        if (allAnnotations.length === 0) {
-            panel.innerHTML = '<p style="color:#64748b; font-style:italic;">No annotations yet.</p>';
-            return;
-        }
-
         allAnnotations.forEach(ann => {
           const div = document.createElement('div');
           div.className = 'annotation-item';
-          const token_range = `tokens [${ann.start_token}:${ann.end_token}]`;
+          
+          let locationInfo = '';
+          if (ann.x_pos != null && ann.y_pos != null) {
+              locationInfo = `Location: ${Number(ann.x_pos).toFixed(1)}%, ${Number(ann.y_pos).toFixed(1)}%`;
+          } else {
+              locationInfo = `Tokens: [${ann.start_token}:${ann.end_token}]`;
+          }
+
           const deleteBtn = '<span class="delete-annotation" onclick="deleteAnnotation(' + ann.id + ')">✕ Delete</span>';
-          div.innerHTML = `<strong>${ann.username || ann.user_id}:</strong> ${ann.content} <br/><span class="meta">${token_range} · ${new Date(ann.created_at).toLocaleString()}</span>${deleteBtn}`;
+          div.innerHTML = `<strong>${ann.username}:</strong> ${ann.content} <br/><span class="meta">${locationInfo} · ${new Date(ann.created_at).toLocaleString()}</span>${deleteBtn}`;
           panel.appendChild(div);
         });
       }
 
+      // --- NEW: Handle Coordinate Messages from Iframe ---
+      window.addEventListener("message", function(event) {
+        if (event.data && event.data.type === 'COORD_CLICK') {
+            // Update hidden inputs
+            document.getElementById('x-pos').value = event.data.x;
+            document.getElementById('y-pos').value = event.data.y;
+
+            document.getElementById('attention-type').value = event.data.attention_type;
+            
+            // Show feedback to user
+            const xStr = Number(event.data.x).toFixed(1);
+            const yStr = Number(event.data.y).toFixed(1);
+            const display = document.getElementById('coords-display');
+            display.textContent = `Selected Location: X=${xStr}%, Y=${yStr}%`;
+            display.style.color = '#16a34a'; // Green success color
+            display.style.fontWeight = 'bold';
+            
+            // Focus comment box
+            document.getElementById('annotation-input').focus();
+        }
+      });
+
       async function addAnnotation() {
         const textarea = document.getElementById('annotation-input');
         const content = textarea.value.trim();
+        const x = document.getElementById('x-pos').value;
+        const y = document.getElementById('y-pos').value;
+
+        if (!content) {
+          alert('Please enter a comment');
+          return;
+        }
         
-        const start = document.getElementById('start-token').value;
-        const end = document.getElementById('end-token').value;
-        
-        if (!content) { alert('Please enter a comment'); return; }
-        if (start === '' || end === '') { alert('Please select a token range'); return; }
+        // Ensure user actually clicked the viz first
+        if (!x || !y) {
+          alert('Please right-click the visualization to set a location marker first.');
+          return;
+        }
 
         const token = localStorage.getItem('auth_token');
         if (!token) {
-          showLoginModal(); // Trigger the modal instead of just alerting
+          alert('Please log in first to add annotations');
           return;
         }
 
         try {
-          const res = await fetch(`/viz/${VIZ_ID}/annotations?content=${encodeURIComponent(content)}&start_token=${start}&end_token=${end}`, {
+          const attType = document.getElementById('attention-type').value;
+          // Send coordinates instead of tokens
+          const query = `content=${encodeURIComponent(content)}&x_pos=${x}&y_pos=${y}&attention_type=${encodeURIComponent(attType)}`;
+          
+          const res = await fetch(`/viz/${VIZ_ID}/annotations?${query}`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`
@@ -110,7 +120,15 @@
 
           if (res.ok) {
             textarea.value = '';
-            // Don't clear tokens immediately in case user wants to add another note to same range
+            document.getElementById('x-pos').value = '';
+            document.getElementById('y-pos').value = '';
+            document.getElementById('coords-display').textContent = 'Location: (None selected)';
+            document.getElementById('coords-display').style.color = 'inherit';
+            
+            // Reload the iframe to convert the "Blue Temp Pin" into a "Red Permanent Pin"
+            const iframe = document.querySelector('iframe');
+            if (iframe) iframe.contentWindow.location.reload();
+            
             await loadAnnotations();
           } else {
             const error = await res.json();
@@ -133,10 +151,16 @@
         try {
           const res = await fetch(`/viz/annotations/${annotationId}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
           });
 
           if (res.ok) {
+            // Reload iframe to remove the pin visuals
+            const iframe = document.querySelector('iframe');
+            if (iframe) iframe.contentWindow.location.reload();
+            
             await loadAnnotations();
           } else {
             const error = await res.json();
@@ -157,6 +181,12 @@
         } else if (el) {
           el.style.display = 'none';
         }
+      }
+
+      function logoutFromViz() {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('username');
+        checkLoginStatus();
       }
 
       window.addEventListener('load', function() { loadAnnotations(); checkLoginStatus(); });
@@ -198,39 +228,43 @@
       </iframe>
 
       <div id="annotation-panel">
-        <h4 style="margin-top:0;">Collaborative Annotations</h4>
+        <h4>Collaborative Annotations</h4>
         
-        <div style="margin-bottom: 1rem; display:flex; gap:10px; align-items:center;">
-          <label><strong>Token Range:</strong></label>
-          <input type="number" id="start-token" placeholder="Start" min="0" style="width: 70px; padding:5px;"> 
-          <span style="color:#999">-</span>
-          <input type="number" id="end-token" placeholder="End" min="0" style="width: 70px; padding:5px;">
+        <div style="margin-bottom: 1rem;">
+          <p style="margin: 0; color: #666; font-size: 0.9rem;">
+              <strong>Right-click</strong> anywhere on the visualization to place a marker.
+          </p>
+          <input type="hidden" id="x-pos">
+          <input type="hidden" id="y-pos">
+          <input type="hidden" id="attention-type" value="All">
+          
+          <div id="coords-display" style="font-family: monospace; color: var(--muted); margin-top: 5px; font-size: 0.85rem;">
+              Location: (None selected)
+          </div>
         </div>
 
-        <textarea id="annotation-input" placeholder="Add your comment here..." style="width: 100%; height: 60px; padding: 10px; margin-bottom: 0.5rem; border:1px solid #ccc; border-radius:6px;"></textarea>
-        
+        <textarea id="annotation-input" placeholder="Add your comment here..." style="width: 100%; height: 60px; padding: 8px; margin-bottom: 0.5rem;"></textarea>
         <button id="add-annotation-btn" onclick="addAnnotation()">Add Comment</button>
-
-        <hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 1.5rem 0;"/>
 
         <h5>All Comments:</h5>
         <div id="annotations-list">
-          <p style="color: #64748b;">Loading annotations...</p>
+          <p style="color: #999;">Loading annotations...</p>
         </div>
 
-        <p style="font-size: 0.9rem; color: #64748b; margin-top:1rem;">
-          Not logged in? <a href="#" onclick="showLoginModal(); return false;" style="color:#2563eb;">Click here to log in</a>.
+        <hr/>
+        <p style="font-size: 0.9rem; color: #666;">
+          Not logged in? <a href="#" onclick="showLoginModal(); return false;">Click here to log in</a> to add annotations.
         </p>
       </div>
     </div>
 
     <div id="login-modal" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
-      <div style="background: white; padding: 2rem; border-radius: 10px; width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+      <div style="background: white; padding: 2rem; border-radius: 10px; width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
         <h3>Login</h3>
-        <input type="text" id="login-username" placeholder="Username" style="width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; border:1px solid #ccc; border-radius:6px;">
-        <input type="password" id="login-password" placeholder="Password" style="width: 100%; padding: 10px; margin-bottom: 20px; box-sizing: border-box; border:1px solid #ccc; border-radius:6px;">
-        <button onclick="performLogin()" class="btn btn-primary" style="width: 100%; margin-bottom: 10px; padding:10px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer;">Login</button>
-        <button onclick="document.getElementById('login-modal').style.display='none'" class="btn btn-secondary" style="width: 100%; padding:10px; background:#e2e8f0; border:none; border-radius:6px; cursor:pointer;">Close</button>
+        <input type="text" id="login-username" placeholder="Username" style="width: 100%; padding: 8px; margin-bottom: 0.5rem; box-sizing: border-box;">
+        <input type="password" id="login-password" placeholder="Password" style="width: 100%; padding: 8px; margin-bottom: 1rem; box-sizing: border-box;">
+        <button onclick="performLogin()" class="btn btn-primary" style="width: 100%; margin-bottom: 0.5rem;">Login</button>
+        <button onclick="document.getElementById('login-modal').style.display='none'" class="btn btn-secondary" style="width: 100%;">Close</button>
       </div>
     </div>
 
