@@ -10,6 +10,29 @@ Our main goal is to enable researchers to:
 - Saving and Sharing: Permanently store these visualizations in a database, creating unique, shareable links.
 - Annotation and Collaboration: Add comments and insights directly onto specific parts of visualizations, fostering a community-driven understanding of complex models.
 
+### Final Project Report
+
+#### GIF Demonstration
+![Demo GIF](assets/demo.gif)
+
+#### AI Integration
+We used Hugging Face and BertViz to visualize model internals, enabling interactive exploration of attention patterns and layer behaviors in models like BERT.
+
+#### AI Usage
+AI tools supported brainstorming, project planning, documentation drafting, and learning new libraries, helping streamline development.
+
+#### Why This Project Is Interesting to Us
+As first-semester PhD students in BYU's Machine Translation lab, we frequently face challenges in interpreting complex deep learning models. This project addresses the lack of accessible, collaborative tools for model visualization, supporting deeper insights and shared research understanding.
+
+#### Key Learnings
+We gained experience building a full-stack application using FastAPI, PostgreSQL, and Redis, along with JWT-based authentication and async request handling. We also learned how to visualize Transformer models with tools like BertViz and integrate them into a web interface. Throughout the project, we improved our collaboration, communication, and problem-solving skills while navigating both technical challenges and design decisions.
+
+#### System Design Considerations
+Our system uses Redis caching to improve performance and provide resilience during GPU server downtime. FastAPI's async capabilities ensure efficient concurrent request handling. JWT authentication secures user actions across the platform.
+
+#### Willingness to Be an Example Project
+We are fine with our project being used as a reference for other students.
+
 ## Initial Project Design
 The following diagrams represent the initial design for the project. 
 ### Initial ERD
