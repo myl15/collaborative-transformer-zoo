@@ -1,11 +1,9 @@
 # database.py
 import os
 from sqlmodel import SQLModel, create_engine, Session
-# from models import Visualization  # Not strictly needed here, but good for circular import checks
 
 # 1. The Connection String
 # Get the database URL from the environment variable.
-# The .env file should be loaded by the main application before this is imported.
 DATABASE_URL = os.getenv("DATABASE_URL")
 print(f"Connecting to database at: {DATABASE_URL}")
 
