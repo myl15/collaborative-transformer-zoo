@@ -1,9 +1,11 @@
 # database.py
+import os
 from sqlmodel import SQLModel, create_engine, Session
-# from models import Visualization  # Not strictly needed here, but good for circular import checks
 
 # 1. The Connection String
-DATABASE_URL = "postgresql://user:password@localhost:5432/transformer_zoo"
+# Get the database URL from the environment variable.
+DATABASE_URL = os.getenv("DATABASE_URL")
+print(f"Connecting to database at: {DATABASE_URL}")
 
 # 2. Create the Engine
 engine = create_engine(DATABASE_URL)

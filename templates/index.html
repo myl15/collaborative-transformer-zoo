@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Transformer Zoo</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+      /* Page specific styles that aren't in styles.css yet */
+      .auth-form { display: none; }
+      .auth-form.active { display: block; }
+      .user-info { display: none; }
+      .user-info.active { display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header class="site-header">
+         <div class="brand">
+           <div class="logo"></div>
+           <h1>Collaborative Transformer Zoo</h1>
+         </div>
+         <div class="user-info" id="user-info">
+             Logged in as: <strong id="username-display"></strong> 
+             <button class="btn btn-secondary" onclick="logout()" style="margin-left:10px;">Logout</button>
+         </div>
+      </header>
+      
+      <div class="auth-section" id="auth-forms">
+        <h3>Account</h3>
+        <div class="auth-tabs">
+          <button class="auth-tab active" onclick="switchTab('login')">Login</button>
+          <button class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
+        </div>
+        
+        <form class="auth-form active" id="login-form" onsubmit="handleLogin(event)">
+          <input type="text" placeholder="Username" id="login-username" required>
+          <input type="password" placeholder="Password" id="login-password" required>
+          <button type="submit" class="btn btn-primary">Login</button>
+          <p id="login-error" style="color: var(--danger); display: none;"></p>
+        </form>
+        
+        <form class="auth-form" id="signup-form" onsubmit="handleSignup(event)">
+          <input type="text" placeholder="Username" id="signup-username" required>
+          <input type="email" placeholder="Email" id="signup-email" required>
+          <input type="password" placeholder="Password" id="signup-password" required>
+          <button type="submit" class="btn btn-primary">Sign Up</button>
+          <p id="signup-error" style="color: var(--danger); display: none;"></p>
+        </form>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #eef2ff; margin: 2rem 0;">
+
+      <form action="/visualize" method="post">
+        <div class="grid">
+            <div>
+                <label><strong>Model Name:</strong></label>
+                <input type="text" name="model_name" value="google/gemma-2b">
+            </div>
+            <div>
+                <label><strong>View Type:</strong></label>
+                <select name="view_type">
+                  <option value="head">Head View (Lines)</option>
+                  <option value="model">Model View (Blocks)</option>
+                </select>
+            </div>
+        </div>
+        
+        <br>
+        <label><strong>Input Text:</strong></label>
+        <textarea name="text">The cat sat on the mat.</textarea>
+        
+        <div style="margin-top:1rem; display:flex; gap:10px;">
+             <button type="submit" class="btn btn-primary">Visualize</button>
+             <a href="/visualizations" class="btn btn-secondary">View Gallery</a>
+        </div>
+      </form>
+    </div>
+
+    <script>
+      // Check if logged in on page load
+      window.addEventListener('load', checkLoginStatus);
+
+      function checkLoginStatus() {
+        const token = localStorage.getItem('auth_token');
+        const username = localStorage.getItem('username');
+        if (token && username) {
+          document.getElementById('auth-forms').style.display = 'none';
+          document.getElementById('user-info').classList.add('active');
+          document.getElementById('username-display').textContent = username;
+        }
+      }
+
+      function switchTab(tab) {
+        document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+        
+        event.target.classList.add('active');
+        document.getElementById(tab + '-form').classList.add('active');
+      }
+
+      async function handleLogin(event) {
+        event.preventDefault();
+        const username = document.getElementById('login-username').value;
+        const password = document.getElementById('login-password').value;
+        const errorEl = document.getElementById('login-error');
+
+        try {
+          const formData = new FormData();
+          formData.append('username', username);
+          formData.append('password', password);
+
+          const res = await fetch('/auth/login', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('auth_token', data.access_token);
+            localStorage.setItem('username', username);
+            errorEl.style.display = 'none';
+            checkLoginStatus();
+            document.getElementById('login-username').value = '';
+            document.getElementById('login-password').value = '';
+          } else {
+            const error = await res.json();
+            errorEl.textContent = error.detail || 'Login failed';
+            errorEl.style.display = 'block';
+          }
+        } catch (err) {
+          errorEl.textContent = 'Error: ' + err.message;
+          errorEl.style.display = 'block';
+        }
+      }
+
+      async function handleSignup(event) {
+        event.preventDefault();
+        const username = document.getElementById('signup-username').value;
+        const email = document.getElementById('signup-email').value;
+        const password = document.getElementById('signup-password').value;
+        const errorEl = document.getElementById('signup-error');
+
+        try {
+          const formData = new FormData();
+          formData.append('username', username);
+          formData.append('email', email);
+          formData.append('password', password);
+
+          const res = await fetch('/auth/signup', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('auth_token', data.access_token);
+            localStorage.setItem('username', username);
+            errorEl.style.display = 'none';
+            checkLoginStatus();
+            document.getElementById('signup-username').value = '';
+            document.getElementById('signup-email').value = '';
+            document.getElementById('signup-password').value = '';
+          } else {
+            const error = await res.json();
+            errorEl.textContent = error.detail || 'Signup failed';
+            errorEl.style.display = 'block';
+          }
+        } catch (err) {
+          errorEl.textContent = 'Error: ' + err.message;
+          errorEl.style.display = 'block';
+        }
+      }
+
+      function logout() {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('username');
+        document.getElementById('user-info').classList.remove('active');
+        document.getElementById('auth-forms').style.display = 'block';
+        location.reload();
+      }
+    </script>
+  </body>
+</html>

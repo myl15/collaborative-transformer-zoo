@@ -47,26 +47,56 @@
         allAnnotations.forEach(ann => {
           const div = document.createElement('div');
           div.className = 'annotation-item';
-          const token_range = `tokens [${ann.start_token}:${ann.end_token}]`;
+          
+          let locationInfo = '';
+          if (ann.x_pos != null && ann.y_pos != null) {
+              locationInfo = `Location: ${Number(ann.x_pos).toFixed(1)}%, ${Number(ann.y_pos).toFixed(1)}%`;
+          } else {
+              locationInfo = `Tokens: [${ann.start_token}:${ann.end_token}]`;
+          }
+
           const deleteBtn = '<span class="delete-annotation" onclick="deleteAnnotation(' + ann.id + ')">✕ Delete</span>';
-          div.innerHTML = `<strong>${ann.username}:</strong> ${ann.content} <br/><span class="meta">${token_range} · ${new Date(ann.created_at).toLocaleString()}</span>${deleteBtn}`;
+          div.innerHTML = `<strong>${ann.username}:</strong> ${ann.content} <br/><span class="meta">${locationInfo} · ${new Date(ann.created_at).toLocaleString()}</span>${deleteBtn}`;
           panel.appendChild(div);
         });
       }
 
+      // --- NEW: Handle Coordinate Messages from Iframe ---
+      window.addEventListener("message", function(event) {
+        if (event.data && event.data.type === 'COORD_CLICK') {
+            // Update hidden inputs
+            document.getElementById('x-pos').value = event.data.x;
+            document.getElementById('y-pos').value = event.data.y;
+
+            document.getElementById('attention-type').value = event.data.attention_type;
+            
+            // Show feedback to user
+            const xStr = Number(event.data.x).toFixed(1);
+            const yStr = Number(event.data.y).toFixed(1);
+            const display = document.getElementById('coords-display');
+            display.textContent = `Selected Location: X=${xStr}%, Y=${yStr}%`;
+            display.style.color = '#16a34a'; // Green success color
+            display.style.fontWeight = 'bold';
+            
+            // Focus comment box
+            document.getElementById('annotation-input').focus();
+        }
+      });
+
       async function addAnnotation() {
         const textarea = document.getElementById('annotation-input');
         const content = textarea.value.trim();
+        const x = document.getElementById('x-pos').value;
+        const y = document.getElementById('y-pos').value;
+
         if (!content) {
           alert('Please enter a comment');
           return;
         }
-
-        const start = document.getElementById('start-token').value;
-        const end = document.getElementById('end-token').value;
         
-        if (start === '' || end === '') {
-          alert('Please select a token range');
+        // Ensure user actually clicked the viz first
+        if (!x || !y) {
+          alert('Please right-click the visualization to set a location marker first.');
           return;
         }
 
@@ -77,7 +107,11 @@
         }
 
         try {
-          const res = await fetch(`/viz/${VIZ_ID}/annotations?content=${encodeURIComponent(content)}&start_token=${start}&end_token=${end}`, {
+          const attType = document.getElementById('attention-type').value;
+          // Send coordinates instead of tokens
+          const query = `content=${encodeURIComponent(content)}&x_pos=${x}&y_pos=${y}&attention_type=${encodeURIComponent(attType)}`;
+          
+          const res = await fetch(`/viz/${VIZ_ID}/annotations?${query}`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`
@@ -86,8 +120,15 @@
 
           if (res.ok) {
             textarea.value = '';
-            document.getElementById('start-token').value = '';
-            document.getElementById('end-token').value = '';
+            document.getElementById('x-pos').value = '';
+            document.getElementById('y-pos').value = '';
+            document.getElementById('coords-display').textContent = 'Location: (None selected)';
+            document.getElementById('coords-display').style.color = 'inherit';
+            
+            // Reload the iframe to convert the "Blue Temp Pin" into a "Red Permanent Pin"
+            const iframe = document.querySelector('iframe');
+            if (iframe) iframe.contentWindow.location.reload();
+            
             await loadAnnotations();
           } else {
             const error = await res.json();
@@ -116,6 +157,10 @@
           });
 
           if (res.ok) {
+            // Reload iframe to remove the pin visuals
+            const iframe = document.querySelector('iframe');
+            if (iframe) iframe.contentWindow.location.reload();
+            
             await loadAnnotations();
           } else {
             const error = await res.json();
@@ -176,19 +221,26 @@
       
       <h3 style="text-align:center;">Viz ID: #{{ viz.id }} | {{ viz.model_name }} ({{ viz.view_type }})</h3>
       
-      <div class="viz-container">
-        {{ viz.html_content|safe }}
-      </div>
+      <iframe 
+          src="/viz/{{ viz.id }}/content" 
+          style="width: 100%; height: 700px; border: 1px solid #ddd; border-radius: 5px; margin: 1.5rem 0;"
+          frameborder="0">
+      </iframe>
 
-      <!-- Annotation Panel -->
       <div id="annotation-panel">
         <h4>Collaborative Annotations</h4>
         
         <div style="margin-bottom: 1rem;">
-          <label><strong>Token Range:</strong></label><br/>
-          Start: <input type="number" id="start-token" min="0" style="width: 80px;"> 
-          End: <input type="number" id="end-token" min="0" style="width: 80px;">
-          <small>(Select which tokens to annotate)</small>
+          <p style="margin: 0; color: #666; font-size: 0.9rem;">
+              <strong>Right-click</strong> anywhere on the visualization to place a marker.
+          </p>
+          <input type="hidden" id="x-pos">
+          <input type="hidden" id="y-pos">
+          <input type="hidden" id="attention-type" value="All">
+          
+          <div id="coords-display" style="font-family: monospace; color: var(--muted); margin-top: 5px; font-size: 0.85rem;">
+              Location: (None selected)
+          </div>
         </div>
 
         <textarea id="annotation-input" placeholder="Add your comment here..." style="width: 100%; height: 60px; padding: 8px; margin-bottom: 0.5rem;"></textarea>
@@ -206,7 +258,6 @@
       </div>
     </div>
 
-    <!-- Simple Login Modal -->
     <div id="login-modal" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
       <div style="background: white; padding: 2rem; border-radius: 10px; width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
         <h3>Login</h3>
