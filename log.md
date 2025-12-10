@@ -12,5 +12,6 @@
 | 12/4/2025 | Began Pin Dropping Functionality | 3 | Myles | |
 | 12/5/2025 | Finished Pin Dropping Functionality | 2.5 | Myles | 8AM-10:30AM |
 | 12/8/2025 | Code Clean Up | 2 | Myles | 12PM-2:00PM
-| | **Myles Total** | **23** | |
-| | **Isaac Total** | **20.5** | |
+| 12/10/2025 | Final Report | 2 | Isaac and Myles | 10AM-12PM |
+| | **Myles Total** | **25** | |
+| | **Isaac Total** | **22.5** | |
